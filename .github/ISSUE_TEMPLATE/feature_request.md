@@ -36,7 +36,7 @@ assignees: ''
 
 ## Are you willing to wait?
 
-ContainerFlow is currently maintainer-driven (no external PRs accepted yet). Features will land based on roadmap priority. See [monitoreo.md](../../monitoreo.md) for what's planned.
+ContainerFlow is currently maintainer-driven (no external PRs accepted yet). Features will land based on roadmap priority. See [roadmap](../../docs/roadmap.md) for what's planned.
 
 - [ ] Yes, I'll wait — I just want to flag this
 - [ ] I'd contribute a PR if/when PRs open

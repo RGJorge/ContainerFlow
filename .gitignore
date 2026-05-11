@@ -11,3 +11,8 @@ data/
 .dockerflow-*.db
 .dockerflow-*.db-wal
 .dockerflow-*.db-shm
+
+# Local notes / marketing — not part of the public repo
+linkdin.md
+# AI assistant context — internal, not for public repo
+CLAUDE.md

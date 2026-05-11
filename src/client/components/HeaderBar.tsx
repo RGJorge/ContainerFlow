@@ -211,7 +211,7 @@ export function HeaderBar({
         />
         <div className="flex flex-col items-end">
           <span className="text-base font-bold text-white tracking-wide">ContainerFlow</span>
-          <span className="text-[9px] text-slate-500 font-mono -mt-1">v0.0.1</span>
+          <span className="text-[9px] text-slate-500 font-mono -mt-1">v{__APP_VERSION__}</span>
         </div>
       </div>
 

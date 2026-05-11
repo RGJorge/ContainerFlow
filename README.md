@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/RGJorge/containerflow/actions/workflows/ci.yml/badge.svg)](https://github.com/RGJorge/containerflow/actions/workflows/ci.yml)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
-![Version](https://img.shields.io/badge/version-v0.1.0-green)
+[![Release](https://img.shields.io/github/v/tag/RGJorge/containerflow?label=version&color=green)](https://github.com/RGJorge/containerflow/tags)
 ![Docker Required](https://img.shields.io/badge/Docker-required-blue?logo=docker)
 ![Bun](https://img.shields.io/badge/runtime-Bun-f9f1e1?logo=bun)
 [![Last Commit](https://img.shields.io/github/last-commit/RGJorge/containerflow)](https://github.com/RGJorge/containerflow/commits/main)
@@ -11,9 +11,33 @@ Real-time Docker architecture visualizer. Displays services, connections and met
 
 ![ContainerFlow demo](docs/demo.gif)
 
+## Por qué ContainerFlow
+
+Las herramientas existentes te muestran números. ContainerFlow además:
+
+- **Visualiza arquitectura** — grafo interactivo con conexiones (app→db, app→cache, proxy→app) detectadas automáticamente, no solo una lista plana
+- **Detecta config sub-óptima** — banners cuando un container corre sin límite de memoria, sin límite de CPU, o sin `restart: unless-stopped`. Te enseña buenas prácticas mientras lo usas
+- **Mide memoria real** — resta page cache (active + inactive), no solo inactive como `docker stats`. Tu DB con buffers Postgres no muestra 98% falso
+- **Multi-usuario seguro** — variable `ALLOWED_PATHS` para servidores compartidos: ves todo, solo tocas lo tuyo
+- **80 MB de RAM, startup en 500ms** — Bun + Hono. Pesa una fracción de Portainer y arranca antes que Grafana
+
+## Quick start
+
+```bash
+git clone https://github.com/RGJorge/containerflow.git
+cd containerflow
+cp .env.example .env
+docker compose up -d
+```
+
+Abre `http://localhost:9470`. Listo.
+
+Para desarrollo nativo (hot reload): `bun install && bun run dev`.
+
 ## Documentación
 
-- **[docker-containerflow.md](./docker-containerflow.md)** — Guía rápida de Docker explicado para usar ContainerFlow: qué hace cada acción (Start, Stop, Restart, Recreate, Rebuild, Remove, Exec), restart policies, resource limits, volúmenes, healthchecks y preguntas frecuentes.
+- **[docs/docker-guide.md](./docs/docker-guide.md)** — Guía rápida de Docker explicado para usar ContainerFlow: qué hace cada acción (Start, Stop, Restart, Recreate, Rebuild, Remove, Exec), restart policies, resource limits, volúmenes, healthchecks y preguntas frecuentes.
+- **[docs/roadmap.md](./docs/roadmap.md)** — Roadmap del proyecto: qué está completo, qué viene, qué se descartó y por qué.
 
 ## Requisitos
 
@@ -380,6 +404,18 @@ src/
   shared/
     types.ts         — tipos compartidos server/client
 ```
+
+## Comunidad y contribuciones
+
+ContainerFlow está en desarrollo activo (`v0.x`).
+
+- 🐛 **Bug?** Abre un [issue](https://github.com/RGJorge/containerflow/issues/new?template=bug_report.md)
+- 💡 **Idea?** Abre un [feature request](https://github.com/RGJorge/containerflow/issues/new?template=feature_request.md)
+- 🔒 **Vulnerabilidad de seguridad?** Reporta privadamente — ver [SECURITY.md](SECURITY.md)
+- 📜 **Code of Conduct** — ver [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- 🛠 **Quiero contribuir código** — ver [CONTRIBUTING.md](CONTRIBUTING.md). Actualmente solo aceptamos issues; PRs se abrirán cuando el proyecto madure.
+
+Si ContainerFlow te resulta útil, una ⭐ en GitHub ayuda a la visibilidad del proyecto.
 
 ## Licencia
 

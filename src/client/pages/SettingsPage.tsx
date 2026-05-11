@@ -122,7 +122,7 @@ export function SettingsPage({ projects, servicesCount, token }: SettingsPagePro
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div className="bg-slate-900/50 rounded-lg p-3">
               <span className="text-slate-500 block text-xs mb-1">{t("settings.version")}</span>
-              <span className="text-slate-200 font-mono">v0.0.1</span>
+              <span className="text-slate-200 font-mono">v{__APP_VERSION__}</span>
             </div>
             <div className="bg-slate-900/50 rounded-lg p-3">
               <span className="text-slate-500 block text-xs mb-1">{t("settings.mode")}</span>

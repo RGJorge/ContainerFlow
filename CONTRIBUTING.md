@@ -41,7 +41,7 @@ Use the [feature request template](.github/ISSUE_TEMPLATE/feature_request.md). T
 - Why existing functionality doesn't work
 - A rough sketch of how you'd want it to work in the UI
 
-We prioritize features that align with the [roadmap](monitoreo.md).
+We prioritize features that align with the [roadmap](docs/roadmap.md).
 
 ## Reporting security vulnerabilities
 
