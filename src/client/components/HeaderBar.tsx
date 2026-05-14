@@ -8,6 +8,7 @@ import type { Service, DockerEvent, NotificationLogEntry } from "../../shared/ty
 import { useT } from "../i18n";
 import { useUpdateInfo } from "../hooks/useUpdateInfo";
 import { UpdateModal } from "./UpdateModal";
+import { ComposeLibraryOverlay } from "./ComposeLibraryOverlay";
 
 export type Page = "dashboard" | "monitoring" | "settings";
 
@@ -272,6 +273,8 @@ export function HeaderBar({
             ES
           </button>
         </div>
+
+        <ComposeLibraryOverlay token={token} />
 
         <NotificationBell notifications={notifications} services={services} token={token} onOpenServiceDetail={onOpenServiceDetail} />
 
