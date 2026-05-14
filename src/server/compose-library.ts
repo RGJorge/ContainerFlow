@@ -34,7 +34,8 @@ export function findComposeFiles(scanPaths: string[]): string[] {
     }
 
     for (const entry of entries) {
-      if (entry.name === "node_modules" || entry.name === ".git") continue;
+      const lowerName = entry.name.toLowerCase();
+      if (lowerName === "node_modules" || lowerName === ".git" || lowerName === "@recycle") continue;
       const fullPath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         walk(fullPath);
@@ -68,23 +69,45 @@ function imageFromDefinition(definition: unknown): string {
   return typeof image === "string" ? image : "";
 }
 
+export function deriveStackIdentity(composeFile: string, scanPaths: string[]): { project: string; variant: string } {
+  const resolvedComposeFile = path.resolve(composeFile);
+  const matchingRoot = scanPaths
+    .map((p) => path.resolve(p))
+    .sort((a, b) => b.length - a.length)
+    .find((scanPath) => resolvedComposeFile === scanPath || resolvedComposeFile.startsWith(scanPath + path.sep));
+
+  if (matchingRoot) {
+    const relative = path.relative(matchingRoot, resolvedComposeFile);
+    const segments = relative.split(path.sep).filter(Boolean);
+    if (segments.length > 0) {
+      const project = segments[0]!;
+      const variant = segments.slice(1, -1).join(" / ");
+      return { project, variant };
+    }
+  }
+
+  return { project: path.basename(path.dirname(resolvedComposeFile)), variant: "" };
+}
+
 export function buildComposeLibrary(
   composeFiles: string[],
   services: Service[],
   isPathAllowed: (filePath: string) => boolean,
+  scanPaths: string[] = [],
 ): ComposeLibraryStack[] {
-  return composeFiles.map((composeFile) => buildStack(composeFile, services, isPathAllowed));
+  return composeFiles.map((composeFile) => buildStack(composeFile, services, isPathAllowed, scanPaths));
 }
 
 export function buildStack(
   composeFile: string,
   services: Service[],
   isPathAllowed: (filePath: string) => boolean,
+  scanPaths: string[] = [],
 ): ComposeLibraryStack {
   const resolvedComposeFile = path.resolve(composeFile);
   const baseStack: ComposeLibraryStack = {
     host: "local",
-    project: path.basename(path.dirname(resolvedComposeFile)),
+    ...deriveStackIdentity(resolvedComposeFile, scanPaths),
     compose_file: resolvedComposeFile,
     locked: !isPathAllowed(resolvedComposeFile),
     services: [],
@@ -102,10 +125,6 @@ export function buildStack(
   if (!serviceDefs || typeof serviceDefs !== "object") {
     return { ...baseStack, error: "Compose file has no services section" };
   }
-
-  const project = typeof doc?.name === "string" && doc.name.trim()
-    ? doc.name.trim()
-    : baseStack.project;
 
   const runtimeByService = new Map<string, Service>();
   for (const svc of services) {
@@ -142,7 +161,6 @@ export function buildStack(
 
   return {
     ...baseStack,
-    project,
     services: libraryServices,
     counts,
   };

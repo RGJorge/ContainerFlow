@@ -160,6 +160,7 @@ export interface ComposeLibraryService {
 export interface ComposeLibraryStack {
   host: string;
   project: string;
+  variant: string;
   compose_file: string;
   locked: boolean;
   error?: string;

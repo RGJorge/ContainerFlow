@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { buildComposeLibrary, buildStack, findComposeFiles, parseScanPaths } from "./compose-library";
+import { buildComposeLibrary, buildStack, deriveStackIdentity, findComposeFiles, parseScanPaths } from "./compose-library";
 import type { Service } from "../shared/types";
 
 const tmpDirs: string[] = [];
@@ -71,10 +71,35 @@ describe("findComposeFiles", () => {
 
     expect(findComposeFiles([root])).toEqual([appCompose, dbCompose].sort());
   });
+
+  it("ignores @Recycle folders", () => {
+    const root = tmpRoot();
+    const appCompose = path.join(root, "app", "compose.yml");
+    const recycledCompose = path.join(root, "@Recycle", "old", "compose.yml");
+    writeFile(appCompose, "services: {}\n");
+    writeFile(recycledCompose, "services: {}\n");
+
+    expect(findComposeFiles([root])).toEqual([appCompose]);
+  });
+});
+
+describe("deriveStackIdentity", () => {
+  it("uses the first folder below the scan root as the stack name and nested folders as the variant", () => {
+    const root = path.resolve("/share/DockerStacks");
+
+    expect(deriveStackIdentity("/share/DockerStacks/tools/quagmire/compose.yml", [root])).toEqual({
+      project: "tools",
+      variant: "quagmire",
+    });
+    expect(deriveStackIdentity("/share/DockerStacks/media/compose.yml", [root])).toEqual({
+      project: "media",
+      variant: "",
+    });
+  });
 });
 
 describe("buildStack", () => {
-  it("extracts compose services and top-level project name", () => {
+  it("extracts compose services and uses the scan-root folder as project name", () => {
     const root = tmpRoot();
     const composeFile = path.join(root, "media", "compose.yml");
     writeFile(composeFile, `
@@ -86,8 +111,9 @@ services:
     image: example/worker:latest
 `);
 
-    const stack = buildStack(composeFile, [], () => true);
-    expect(stack.project).toBe("media-prod");
+    const stack = buildStack(composeFile, [], () => true, [root]);
+    expect(stack.project).toBe("media");
+    expect(stack.variant).toBe("");
     expect(stack.services.map((s) => s.name)).toEqual(["api", "worker"]);
     expect(stack.services[0].image).toBe("example/api:latest");
     expect(stack.counts.not_created).toBe(2);
