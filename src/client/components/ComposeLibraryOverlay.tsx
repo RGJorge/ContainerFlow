@@ -53,7 +53,7 @@ export function ComposeLibraryOverlay({ token }: ComposeLibraryOverlayProps) {
   const [actionJob, setActionJob] = useState<ComposeActionJob | null>(null);
   const [successCloseIn, setSuccessCloseIn] = useState<number | null>(null);
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
-  const actionLogRef = useRef<HTMLPreElement>(null);
+  const actionLogRef = useRef<HTMLDivElement>(null);
   const ref = useRef<HTMLDivElement>(null);
 
   const headers = useCallback((json = false): Record<string, string> => {
@@ -181,6 +181,13 @@ export function ComposeLibraryOverlay({ token }: ComposeLibraryOverlayProps) {
 
     return () => window.clearInterval(interval);
   }, [actionJob?.id, actionJob?.status]);
+
+  const actionOutputLines = useMemo(() => {
+    const output = actionJob?.output || "";
+    const lines = output.split(/\r?\n/);
+    while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+    return lines;
+  }, [actionJob?.output]);
 
   const pollJob = useCallback((jobId: string) => {
     fetch(`/api/compose-library/jobs/${jobId}`, { headers: headers() })
@@ -330,9 +337,23 @@ export function ComposeLibraryOverlay({ token }: ComposeLibraryOverlayProps) {
                     <X size={12} />
                   </button>
                 </div>
-                <pre ref={actionLogRef} className="max-h-40 overflow-auto whitespace-pre-wrap break-words px-2.5 py-2 font-mono text-[11px] leading-4 text-slate-300">
-                  {actionJob.output || "Waiting for output..."}
-                </pre>
+                <div ref={actionLogRef} className="max-h-32 overflow-y-auto px-3 py-3 font-mono text-[11px] space-y-0.5">
+                  {actionOutputLines.length > 0 ? (
+                    actionOutputLines.map((line, i) => (
+                      <div
+                        key={`${actionJob.id || "job"}:${i}`}
+                        className={`${composeActionLineClass(line)} animate-[fadeIn_0.15s_ease-out]`}
+                      >
+                        {line}
+                        {i === actionOutputLines.length - 1 && actionJob.status === "running" && (
+                          <span className="inline-block w-1.5 h-3 bg-cyan-400 ml-1 animate-pulse" />
+                        )}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-slate-500">Waiting for output...</div>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -453,4 +474,16 @@ export function ComposeLibraryOverlay({ token }: ComposeLibraryOverlayProps) {
 function pathLabel(composeFile: string): string {
   const parts = composeFile.split("/");
   return parts.slice(-2).join("/");
+}
+
+const ERROR_PATTERN = /\b(error|fatal|critical|exception|traceback|panic|failed|segfault|denied|refused)\b/i;
+const SUCCESS_PATTERN = /\b(ok|done|success|successful|started|starting|running|created|recreated|removed|up-to-date|completed|accepted|established)\b/i;
+const WARN_PATTERN = /\b(warn|warning|skipped|deprecated)\b/i;
+
+function composeActionLineClass(line: string): string {
+  if (line.startsWith("$") || line.startsWith("[+]") || line.startsWith("=>")) return "text-cyan-400";
+  if (ERROR_PATTERN.test(line)) return "text-red-400";
+  if (WARN_PATTERN.test(line)) return "text-amber-400";
+  if (SUCCESS_PATTERN.test(line)) return "text-emerald-400";
+  return "text-slate-400";
 }
