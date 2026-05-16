@@ -7,6 +7,7 @@ import { StatsCard } from "../components/StatsCard";
 import { ThresholdBar } from "../components/ThresholdBar";
 import { Tooltip } from "../components/Tooltip";
 import { guessIcon } from "../nodes/ServiceNode";
+import { getComposeKey } from "../engine/layout";
 
 function timeAgo(ts: number): string {
   const diff = Math.floor((Date.now() / 1000) - ts);
@@ -85,9 +86,10 @@ interface MonitoringPageProps {
   eventLogStream: EventLogEntry[];
   notificationStream: NotificationLogEntry[];
   onOpenServiceDetail: (uid: string, tab?: "info" | "config" | "env" | "stats") => void;
+  projectAliases?: Record<string, string>;
 }
 
-export function MonitoringPage({ events, token, services, eventLogStream, notificationStream, onOpenServiceDetail }: MonitoringPageProps) {
+export function MonitoringPage({ events, token, services, eventLogStream, notificationStream, onOpenServiceDetail, projectAliases = {} }: MonitoringPageProps) {
   const { t } = useT();
   const [statsRange, setStatsRange] = useState<StatsRange>("1h");
   const [activeTab, setActiveTab] = useState<"history" | "events" | "notifications">("history");
@@ -235,12 +237,13 @@ export function MonitoringPage({ events, token, services, eventLogStream, notifi
   };
 
   // Labels
+  const aliasOrName = (p: string) => projectAliases[p] || p;
   const projectLabel = selectedProjects.size === 0
     ? t("monitoring.filterProject")
     : selectedProjects.size === allProjects.length
       ? t("monitoring.allProjects")
       : selectedProjects.size === 1
-        ? [...selectedProjects][0]
+        ? aliasOrName([...selectedProjects][0])
         : `${selectedProjects.size} ${t("filter.projects").toLowerCase()}`;
 
   const serviceLabel = selectedServices.size === 0
@@ -308,18 +311,24 @@ export function MonitoringPage({ events, token, services, eventLogStream, notifi
                   <div className="border-t border-slate-700/50 my-1" />
                   {allProjects.map((project) => {
                     const isSelected = selectedProjects.has(project);
+                    const composeKeys = [...new Set(services.filter((s) => s.project === project).map((s) => getComposeKey(s.compose_file)))];
+                    const composeSuffix = composeKeys.join(" - ");
                     return (
                       <button
                         key={project}
                         onClick={() => toggleProject(project)}
+                        title={composeSuffix ? `${aliasOrName(project)} / ${composeSuffix}` : aliasOrName(project)}
                         className="flex items-center gap-2.5 w-full px-3.5 py-2 text-sm hover:bg-slate-700/60 transition-colors"
                       >
-                        <div className={`w-4 h-4 rounded border flex items-center justify-center ${
+                        <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${
                           isSelected ? "bg-cyan-500 border-cyan-500" : "border-slate-600"
                         }`}>
                           {isSelected && <Check size={12} className="text-white" />}
                         </div>
-                        <span className={isSelected ? "text-slate-200" : "text-slate-400"}>{project}</span>
+                        <span className={`min-w-0 truncate uppercase ${isSelected ? "text-slate-200" : "text-slate-400"}`}>
+                          {aliasOrName(project)}
+                          {composeSuffix && <span className="ml-1 text-xs text-slate-500">/ {composeSuffix}</span>}
+                        </span>
                       </button>
                     );
                   })}
@@ -453,7 +462,13 @@ export function MonitoringPage({ events, token, services, eventLogStream, notifi
                         ? ([...selectedServices][0].split("/").pop() || [...selectedServices][0])
                         : `${selectedServices.size} ${t("footer.containers")}`)
                     : selectedProjects.size === 1
-                      ? [...selectedProjects][0]
+                      ? (() => {
+                          const proj = [...selectedProjects][0];
+                          const display = aliasOrName(proj);
+                          const composeKeys = [...new Set(services.filter((s) => s.project === proj).map((s) => getComposeKey(s.compose_file)))];
+                          const suffix = composeKeys.join(" - ");
+                          return suffix ? `${display} / ${suffix.toUpperCase()}` : display;
+                        })()
                       : selectedProjects.size === allProjects.length
                         ? t("monitoring.allProjects")
                         : `${selectedProjects.size} ${t("filter.projects").toLowerCase()}`
@@ -478,6 +493,7 @@ export function MonitoringPage({ events, token, services, eventLogStream, notifi
                   globalRange={statsRange}
                   fallbackData={filteredHistory[svc] || []}
                   token={token}
+                  projectAliases={projectAliases}
                 />
               ))}
               </div>
@@ -581,7 +597,7 @@ function MonitoringTotalsCard({
   return (
     <div className="px-5 py-3 border-b border-slate-700/40 bg-slate-900/40">
       <div className="flex items-center gap-2 mb-2">
-        <span className="text-xs text-slate-300 font-medium truncate">{title}</span>
+        <span className="text-xs text-slate-300 font-medium truncate uppercase">{title}</span>
         <span className="text-[10px] text-slate-500">· {containerCount} {t("footer.containers")}</span>
       </div>
       <div className="grid grid-cols-2 gap-2">
@@ -637,6 +653,7 @@ interface MonitoringServiceCardProps {
   globalRange: StatsRange;
   fallbackData: StatsHistoryPoint[];
   token: string;
+  projectAliases: Record<string, string>;
 }
 
 function MonitoringServiceCard({
@@ -655,6 +672,7 @@ function MonitoringServiceCard({
   globalRange,
   fallbackData,
   token,
+  projectAliases,
 }: MonitoringServiceCardProps) {
   const { t } = useT();
   const [localRange, setLocalRange] = useState<StatsRange | null>(null);
@@ -692,9 +710,17 @@ function MonitoringServiceCard({
         <ServiceIcon uid={svc} services={services} />
         <div className="min-w-0">
           <span className="text-xs text-slate-300 font-medium truncate block">{shortName}</span>
-          {svc.includes("/") && (
-            <span className="text-[10px] text-slate-500 truncate block leading-tight">{svc.split("/")[0]}</span>
-          )}
+          {svc.includes("/") && (() => {
+            const proj = svc.split("/")[0];
+            const display = projectAliases[proj] || proj;
+            // Only show THIS service's compose (not the whole project's list).
+            const thisCompose = svcData ? getComposeKey(svcData.compose_file) : "";
+            return (
+              <span className="text-[10px] text-slate-500 truncate block leading-tight uppercase">
+                {display}{thisCompose && <span> / {thisCompose}</span>}
+              </span>
+            );
+          })()}
         </div>
         <div className="flex-1" />
         {/* Per-card range buttons */}

@@ -26,6 +26,12 @@ const en = {
   "controls.exportPng.tooLarge": "Graph is too large to export at full quality",
   "controls.exportPng.failed": "Failed to export graph",
 
+  // Group alias
+  "group.rename": "Rename project",
+  "group.resetAlias": "Reset to original name",
+  "group.saveAlias": "Save",
+  "group.cancelAlias": "Cancel",
+
   // Login
   "login.connecting": "Connecting...",
   "login.connect": "Connect",
@@ -290,6 +296,12 @@ const es: Record<TranslationKey, string> = {
   "controls.exportPng.empty": "No hay containers para exportar",
   "controls.exportPng.tooLarge": "El grafo es muy grande para exportar en alta calidad",
   "controls.exportPng.failed": "Error al exportar el grafo",
+
+  // Group alias
+  "group.rename": "Renombrar proyecto",
+  "group.resetAlias": "Restaurar nombre original",
+  "group.saveAlias": "Guardar",
+  "group.cancelAlias": "Cancelar",
 
   // Login
   "login.connecting": "Conectando...",

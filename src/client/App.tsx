@@ -18,7 +18,7 @@ import { useDocker } from "./hooks/useDocker";
 import { useServerConfig } from "./hooks/useServerConfig";
 import { I18nProvider, useT } from "./i18n";
 import { createStatsStore, StatsStoreContext } from "./hooks/useStatsStore";
-import { buildLayout, computeEdges, NODE_WIDTH, NODE_HEIGHT, GROUP_PADDING, GROUP_HEADER } from "./engine/layout";
+import { buildLayout, computeEdges, getComposeKey, NODE_WIDTH, NODE_HEIGHT, GROUP_PADDING, GROUP_HEADER } from "./engine/layout";
 import { DetailPanel } from "./panels/DetailPanel";
 import { NodeContextMenu } from "./components/NodeContextMenu";
 import { LoginScreen } from "./components/LoginScreen";
@@ -144,12 +144,47 @@ function Dashboard({ token }: { token: string }) {
   const [containerSettings, setContainerSettings] = useState<Record<string, { notificationsEnabled?: boolean; cpuThreshold?: number | null; memThreshold?: number | null }>>({});
   const [globalThresholds, setGlobalThresholds] = useState<{ cpu: number; mem: number }>({ cpu: 50, mem: 60 });
   const [discordEnabled, setDiscordEnabled] = useState(false);
+  // Project aliases — friendly names for cryptic project keys (Coolify, Dokploy, etc.)
+  const [projectAliases, setProjectAliases] = useState<Record<string, string>>({});
+  // Save / reset handler — passed to GroupNode via node data. Wrapped in a ref
+  // so the layout effect doesn't have to recompute every time the callback
+  // identity changes; GroupNode always gets the latest version.
+  const handleAliasChange = useCallback(async (project: string, newAlias: string) => {
+    const trimmed = newAlias.trim();
+    setProjectAliases((prev) => {
+      const next = { ...prev };
+      if (trimmed) next[project] = trimmed;
+      else delete next[project];
+      return next;
+    });
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    try {
+      await fetch("/api/project-aliases", {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({ project, alias: trimmed }),
+      });
+    } catch {
+      // On error, refetch from server to revert optimistic update.
+      fetch("/api/project-aliases", { headers })
+        .then((r) => r.ok ? r.json() : {})
+        .then(setProjectAliases)
+        .catch(() => {});
+    }
+  }, [token]);
+  const handleAliasChangeRef = useRef(handleAliasChange);
+  handleAliasChangeRef.current = handleAliasChange;
   useEffect(() => {
     const headers: Record<string, string> = {};
     if (token) headers["Authorization"] = `Bearer ${token}`;
     fetch("/api/container-settings", { headers })
       .then((r) => r.ok ? r.json() : {})
       .then(setContainerSettings)
+      .catch(() => {});
+    fetch("/api/project-aliases", { headers })
+      .then((r) => r.ok ? r.json() : {})
+      .then(setProjectAliases)
       .catch(() => {});
     fetch("/api/discord-config", { headers })
       .then((r) => r.ok ? r.json() : null)
@@ -365,7 +400,8 @@ function Dashboard({ token }: { token: string }) {
 
     const { nodes: newNodes } = buildLayout(filteredServices, filteredConnections);
 
-    // Mark service nodes as locked + inject effective thresholds for progress bar coloring
+    // Mark service nodes as locked + inject effective thresholds for progress bar coloring.
+    // For group nodes, inject the alias (if any) + the change handler.
     for (const n of newNodes) {
       if (n.type === "service") {
         const svc = filteredServices.find((s) => s.uid === n.id);
@@ -375,6 +411,15 @@ function Dashboard({ token }: { token: string }) {
           const notifsOn = discordEnabled && (cs?.notificationsEnabled !== false);
           (n.data as any).cpuThreshold = notifsOn ? (cs?.cpuThreshold ?? globalThresholds.cpu) : undefined;
           (n.data as any).memThreshold = notifsOn ? (cs?.memThreshold ?? globalThresholds.mem) : undefined;
+        }
+      } else if (n.type === "group") {
+        // Use the raw `project` from the layout (NOT the groupKey which includes
+        // the compose suffix). This way the alias matches what `service.project`
+        // is on individual services, and the filter dropdown shares the same key.
+        const project = (n.data as any).project as string | undefined;
+        if (project) {
+          (n.data as any).alias = projectAliases[project];
+          (n.data as any).onAliasChange = handleAliasChangeRef.current;
         }
       }
     }
@@ -459,7 +504,7 @@ function Dashboard({ token }: { token: string }) {
         return result;
       });
     }
-  }, [filteredServices, filteredConnections, canInteract, containerSettings, globalThresholds, discordEnabled]);
+  }, [filteredServices, filteredConnections, canInteract, containerSettings, globalThresholds, discordEnabled, projectAliases]);
 
   // Recompute edges + handles on drag end (not every pixel)
   const recomputeEdges = useCallback((currentNodes: Node[]) => {
@@ -567,7 +612,7 @@ function Dashboard({ token }: { token: string }) {
 
       <ActionErrorToast errors={actionErrors} onDismiss={dismissActionError} onClearAll={clearActionErrors} />
 
-      {activePage === "monitoring" && <MonitoringPage events={events} token={token} services={services} eventLogStream={eventLogStream} notificationStream={notificationStream} onOpenServiceDetail={openServiceDetail} />}
+      {activePage === "monitoring" && <MonitoringPage events={events} token={token} services={services} eventLogStream={eventLogStream} notificationStream={notificationStream} onOpenServiceDetail={openServiceDetail} projectAliases={projectAliases} />}
       {activePage === "settings" && <SettingsPage projects={projects} servicesCount={services.length} token={token} />}
 
       {/* Canvas — inset (only visible on dashboard) */}
@@ -674,7 +719,7 @@ function Dashboard({ token }: { token: string }) {
               <ChevronDown size={14} className={`text-slate-500 transition-transform ${filterOpen ? "rotate-180" : ""}`} />
             </button>
             {filterOpen && (
-              <div className="absolute top-full right-0 mt-1.5 bg-slate-800 border border-slate-700 rounded-lg shadow-xl shadow-black/40 py-1.5 min-w-[220px] max-h-[280px] overflow-y-auto">
+              <div className="absolute top-full right-0 mt-1.5 bg-slate-800 border border-slate-700 rounded-lg shadow-xl shadow-black/40 py-1.5 min-w-[280px] max-h-[280px] overflow-y-auto">
                 {/* Select/Deselect all */}
                 <button
                   onClick={() => {
@@ -705,11 +750,14 @@ function Dashboard({ token }: { token: string }) {
                   const projectServices = services.filter((s) => s.project === p);
                   const running = projectServices.filter((s) => s.state === "running").length;
                   const stopped = projectServices.length - running;
+                  const display = projectAliases[p] || p;
+                  const composeKeys = [...new Set(projectServices.map((s) => getComposeKey(s.compose_file)))];
+                  const composeSuffix = composeKeys.join(" - ");
                   return (
                     <button
                       key={p}
                       onClick={() => toggleProject(p)}
-                      title={p}
+                      title={composeSuffix ? `${display} / ${composeSuffix}` : display}
                       className="flex items-center gap-2.5 w-full px-3.5 py-2 text-sm hover:bg-slate-700/60 transition-colors"
                     >
                       <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${
@@ -717,7 +765,10 @@ function Dashboard({ token }: { token: string }) {
                       }`}>
                         {active && <Check size={12} className="text-white" />}
                       </div>
-                      <span className={`flex-1 min-w-0 truncate text-left ${active ? "text-slate-200" : "text-slate-500"}`}>{p}</span>
+                      <span className={`flex-1 min-w-0 truncate text-left uppercase ${active ? "text-slate-200" : "text-slate-500"}`}>
+                        {display}
+                        {composeSuffix && <span className="ml-1 text-xs text-slate-500">/ {composeSuffix}</span>}
+                      </span>
                       <span className="ml-auto flex items-center gap-1.5 text-xs shrink-0">
                         <span className="text-emerald-500/70">{running}</span>
                         <span className="text-slate-600">/</span>

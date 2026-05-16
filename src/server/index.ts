@@ -8,6 +8,7 @@ import { docker, discoverServices, discoverConnections, getContainerLogs, stream
 import { pollStats, watchDockerEvents } from "./watcher";
 import { loadDiscordConfig, saveDiscordConfig, notifyStateChange, notifyResourceAlert, notifyUIAction, notifyActionError, testWebhook, checkDownServices, setNotificationListener } from "./discord";
 import { loadContainerSettings, saveContainerSettings } from "./container-settings";
+import { loadProjectAliases, saveProjectAliases, sanitizeAlias } from "./project-aliases";
 import { initStatsDB, insertStats, getStatsHistory, getAllServicesStatsHistory } from "./stats-db";
 import { initEventsDB, insertEvent, insertNotification, getEvents, getNotifications, type EventLogEntry, type NotificationLogEntry } from "./events-db";
 import type { Service, Stats, WSMessage, DiscordConfig, ContainerSettings, StatsRange } from "../shared/types";
@@ -202,7 +203,8 @@ app.get("/api/init", async (c) => {
   // We deliberately do NOT trigger a fresh pollStats here — on cold start
   // with many containers it can exceed Bun's 10s request timeout and hang
   // the dashboard. The first regular poll (within ~3s) populates via WS.
-  return c.json({ services, connections, positions, stats: lastStats });
+  const projectAliases = loadProjectAliases();
+  return c.json({ services, connections, positions, stats: lastStats, projectAliases });
 });
 
 // ── Server config (read by frontend to disable buttons for non-allowed paths) ──
@@ -613,6 +615,43 @@ app.put("/api/container-settings", async (c) => {
   } catch {
     return c.json({ error: "Failed to save" }, 500);
   }
+});
+
+// ── Project aliases ──
+app.get("/api/project-aliases", (c) => {
+  return c.json(loadProjectAliases());
+});
+
+app.put("/api/project-aliases", async (c) => {
+  try {
+    const body = await c.req.json() as { project: string; alias: string };
+    if (!body.project) {
+      return c.json({ error: "Missing project" }, 400);
+    }
+    const aliases = loadProjectAliases();
+    const clean = sanitizeAlias(body.alias || "");
+    if (clean) {
+      aliases[body.project] = clean;
+    } else {
+      // Empty alias = reset to original (remove the entry)
+      delete aliases[body.project];
+    }
+    saveProjectAliases(aliases);
+    return c.json({ ok: true, alias: clean || null });
+  } catch {
+    return c.json({ error: "Failed to save" }, 500);
+  }
+});
+
+app.delete("/api/project-aliases/:project", (c) => {
+  const project = c.req.param("project");
+  if (!project) {
+    return c.json({ error: "Missing project" }, 400);
+  }
+  const aliases = loadProjectAliases();
+  delete aliases[project];
+  saveProjectAliases(aliases);
+  return c.json({ ok: true });
 });
 
 // ── Stats history ──

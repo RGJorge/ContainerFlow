@@ -9,7 +9,7 @@ export const GROUP_PADDING = 28;
 export const GROUP_HEADER = 44;
 const GROUP_GAP = 50;
 
-function getComposeKey(file: string): string {
+export function getComposeKey(file: string): string {
   if (!file) return "default";
   const match = file.match(/docker-compose\.?(.*)\.yml/);
   const key = match?.[1] || "";
@@ -127,12 +127,14 @@ export function buildLayout(
       .filter(Boolean);
     const subtitle = composeFiles.join(", ");
 
-    // Group node
+    // Group node. `project` is the raw project key (without the compose part);
+    // it's what the alias system uses so the same alias applies across all
+    // compose files of the same project and matches the filter dropdown.
     nodes.push({
       id: `group-${groupKey}`,
       type: "group",
       position: { x: groupX, y: 0 },
-      data: { label: getGroupLabel(groupKey), subtitle, count: svcs.length },
+      data: { label: getGroupLabel(groupKey), subtitle, count: svcs.length, project: svcs[0]?.project },
       style: {
         width: groupWidth,
         height: groupHeight,
