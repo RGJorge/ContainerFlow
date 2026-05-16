@@ -31,6 +31,8 @@ const en = {
   "group.resetAlias": "Reset to original name",
   "group.saveAlias": "Save",
   "group.cancelAlias": "Cancel",
+  "group.changeColor": "Change color",
+  "group.resetColor": "Reset color",
 
   // Login
   "login.connecting": "Connecting...",
@@ -301,6 +303,8 @@ const es: Record<TranslationKey, string> = {
   "group.rename": "Renombrar proyecto",
   "group.resetAlias": "Restaurar nombre original",
   "group.saveAlias": "Guardar",
+  "group.changeColor": "Cambiar color",
+  "group.resetColor": "Restaurar color",
   "group.cancelAlias": "Cancelar",
 
   // Login

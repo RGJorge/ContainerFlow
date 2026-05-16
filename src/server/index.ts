@@ -9,6 +9,7 @@ import { pollStats, watchDockerEvents } from "./watcher";
 import { loadDiscordConfig, saveDiscordConfig, notifyStateChange, notifyResourceAlert, notifyUIAction, notifyActionError, testWebhook, checkDownServices, setNotificationListener } from "./discord";
 import { loadContainerSettings, saveContainerSettings } from "./container-settings";
 import { loadProjectAliases, saveProjectAliases, sanitizeAlias } from "./project-aliases";
+import { loadProjectColors, saveProjectColors, sanitizeColor } from "./project-colors";
 import { initStatsDB, insertStats, getStatsHistory, getAllServicesStatsHistory } from "./stats-db";
 import { initEventsDB, insertEvent, insertNotification, getEvents, getNotifications, type EventLogEntry, type NotificationLogEntry } from "./events-db";
 import type { Service, Stats, WSMessage, DiscordConfig, ContainerSettings, StatsRange } from "../shared/types";
@@ -204,7 +205,8 @@ app.get("/api/init", async (c) => {
   // with many containers it can exceed Bun's 10s request timeout and hang
   // the dashboard. The first regular poll (within ~3s) populates via WS.
   const projectAliases = loadProjectAliases();
-  return c.json({ services, connections, positions, stats: lastStats, projectAliases });
+  const projectColors = loadProjectColors();
+  return c.json({ services, connections, positions, stats: lastStats, projectAliases, projectColors });
 });
 
 // ── Server config (read by frontend to disable buttons for non-allowed paths) ──
@@ -218,7 +220,7 @@ app.get("/api/config", (c) => {
 
 // ── Helper: get service uid from container inspect info ──
 function getContainerUid(info: any): string {
-  const project = info.Config?.Labels?.["com.docker.compose.project"] || "standalone";
+  const project = info.Config?.Labels?.["com.docker.compose.project"] || "docker";
   const service = info.Config?.Labels?.["com.docker.compose.service"] || info.Name?.replace(/^\//, "") || "unknown";
   return `${project}/${service}`;
 }
@@ -290,7 +292,7 @@ app.post("/api/containers/:id/rebuild", async (c) => {
     if (denied) return c.json({ error: denied }, 403);
     const composeFile = info.Config?.Labels?.["com.docker.compose.project.config_files"];
     const serviceName = info.Config?.Labels?.["com.docker.compose.service"];
-    const project = info.Config?.Labels?.["com.docker.compose.project"] || "standalone";
+    const project = info.Config?.Labels?.["com.docker.compose.project"] || "docker";
     if (!composeFile || !serviceName) {
       return c.json({ error: "Not a Compose service — rebuild requires docker-compose" }, 400);
     }
@@ -346,7 +348,7 @@ app.post("/api/containers/:id/recreate", async (c) => {
     if (denied) return c.json({ error: denied }, 403);
     const composeFile = info.Config?.Labels?.["com.docker.compose.project.config_files"];
     const serviceName = info.Config?.Labels?.["com.docker.compose.service"];
-    const project = info.Config?.Labels?.["com.docker.compose.project"] || "standalone";
+    const project = info.Config?.Labels?.["com.docker.compose.project"] || "docker";
     if (!composeFile || !serviceName) {
       return c.json({ error: "Not a Compose service — recreate requires docker-compose" }, 400);
     }
@@ -651,6 +653,42 @@ app.delete("/api/project-aliases/:project", (c) => {
   const aliases = loadProjectAliases();
   delete aliases[project];
   saveProjectAliases(aliases);
+  return c.json({ ok: true });
+});
+
+// ── Project colors ──
+app.get("/api/project-colors", (c) => {
+  return c.json(loadProjectColors());
+});
+
+app.put("/api/project-colors", async (c) => {
+  try {
+    const body = await c.req.json() as { project: string; color: string };
+    if (!body.project) {
+      return c.json({ error: "Missing project" }, 400);
+    }
+    const colors = loadProjectColors();
+    const clean = sanitizeColor(body.color || "");
+    if (clean) {
+      colors[body.project] = clean;
+    } else {
+      delete colors[body.project];
+    }
+    saveProjectColors(colors);
+    return c.json({ ok: true, color: clean || null });
+  } catch {
+    return c.json({ error: "Failed to save" }, 500);
+  }
+});
+
+app.delete("/api/project-colors/:project", (c) => {
+  const project = c.req.param("project");
+  if (!project) {
+    return c.json({ error: "Missing project" }, 400);
+  }
+  const colors = loadProjectColors();
+  delete colors[project];
+  saveProjectColors(colors);
   return c.json({ ok: true });
 });
 

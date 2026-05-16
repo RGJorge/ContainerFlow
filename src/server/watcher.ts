@@ -138,7 +138,7 @@ export function watchDockerEvents(onEvent: (event: DockerEvent) => void) {
             "unknown";
           const svcProject =
             event.Actor?.Attributes?.["com.docker.compose.project"] ||
-            "standalone";
+            "docker";
           onEvent({
             type: "docker",
             action,

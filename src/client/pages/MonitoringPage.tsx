@@ -176,7 +176,7 @@ export function MonitoringPage({ events, token, services, eventLogStream, notifi
     const projects = new Set<string>();
     for (const svc of allServiceNames) {
       const slash = svc.indexOf("/");
-      projects.add(slash >= 0 ? svc.slice(0, slash) : "standalone");
+      projects.add(slash >= 0 ? svc.slice(0, slash) : "docker");
     }
     return [...projects].sort();
   }, [allServiceNames]);
@@ -186,7 +186,7 @@ export function MonitoringPage({ events, token, services, eventLogStream, notifi
     if (selectedProjects.size === 0) return allServiceNames;
     return allServiceNames.filter((svc) => {
       const slash = svc.indexOf("/");
-      const project = slash >= 0 ? svc.slice(0, slash) : "standalone";
+      const project = slash >= 0 ? svc.slice(0, slash) : "docker";
       return selectedProjects.has(project);
     });
   }, [allServiceNames, selectedProjects]);

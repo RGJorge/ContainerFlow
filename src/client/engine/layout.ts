@@ -11,7 +11,13 @@ const GROUP_GAP = 50;
 
 export function getComposeKey(file: string): string {
   if (!file) return "default";
-  const match = file.match(/docker-compose\.?(.*)\.yml/);
+  // When multiple compose files are merged (COMPOSE_FILE env var with
+  // multiple paths), the docker `config_files` label is a comma-joined list.
+  // Use the LAST path — in docker-compose, the override file wins, and its
+  // name (e.g. "local", "dev") is the meaningful environment key.
+  const files = file.split(",");
+  const primary = files[files.length - 1] || file;
+  const match = primary.match(/docker-compose\.?(.*)\.yml/);
   const key = match?.[1] || "";
   if (key === "") return "prod";
   return key.replace(/^\./, "");
@@ -107,7 +113,10 @@ export function buildLayout(
     const contentWidth = cols * (NODE_WIDTH + NODE_GAP_X) - NODE_GAP_X;
     const contentHeight = rows * (NODE_HEIGHT + NODE_GAP_Y) - NODE_GAP_Y;
     const groupWidth = Math.max(contentWidth + GROUP_PADDING * 2, NODE_WIDTH + GROUP_PADDING * 3);
-    const groupHeight = contentHeight + GROUP_PADDING * 2 + GROUP_HEADER + GROUP_PADDING;
+    // Vertical: header + top padding + content + bottom padding + footer reserve.
+    // Keeps top/bottom margins symmetric and leaves room for the subtitle footer.
+    const FOOTER_RESERVE = 22;
+    const groupHeight = GROUP_HEADER + GROUP_PADDING + contentHeight + GROUP_PADDING + FOOTER_RESERVE;
 
     groupPositions.set(groupKey, { x: groupX, y: 0, width: groupWidth, height: groupHeight });
 
@@ -121,11 +130,16 @@ export function buildLayout(
     const bgColor = knownBg || dynamic!.bg;
     const borderColor = knownBorder || dynamic!.border;
 
-    // Compose file subtitle — show unique compose files in this group
-    const composeFiles = [...new Set(svcs.map((s) => s.compose_file).filter(Boolean))]
+    // Subtitle: the compose filename(s). For COMPOSE_FILE merges, show the
+    // override (last file) since that's what defines the runtime config.
+    // Containers without compose labels (plain `docker run`) fall back to "docker".
+    const composeFiles = [...new Set(svcs.map((s) => {
+      const parts = (s.compose_file || "").split(",");
+      return parts[parts.length - 1] || s.compose_file;
+    }).filter(Boolean))]
       .map((f) => f.split("/").pop() || "")
       .filter(Boolean);
-    const subtitle = composeFiles.join(", ");
+    const subtitle = composeFiles.length > 0 ? composeFiles.join(", ") : "docker";
 
     // Group node. `project` is the raw project key (without the compose part);
     // it's what the alias system uses so the same alias applies across all
@@ -148,11 +162,15 @@ export function buildLayout(
       },
     });
 
-    // Service nodes inside group (grid layout)
+    // Service nodes inside group (grid layout).
+    // Horizontally center the content within the group: when there's only
+    // one service (or when groupWidth was bumped to its minimum), the row
+    // would otherwise sit left-aligned with extra space on the right.
+    const horizontalCenter = (groupWidth - contentWidth) / 2;
     svcs.forEach((svc, i) => {
       const col = i % cols;
       const row = Math.floor(i / cols);
-      const x = GROUP_PADDING + col * (NODE_WIDTH + NODE_GAP_X);
+      const x = horizontalCenter + col * (NODE_WIDTH + NODE_GAP_X);
       const y = GROUP_HEADER + GROUP_PADDING + row * (NODE_HEIGHT + NODE_GAP_Y);
 
       nodes.push({

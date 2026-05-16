@@ -28,7 +28,7 @@ export async function discoverServices(all: boolean, projects: string[]): Promis
 
   let services: Service[] = containers.map((c, i) => {
     const name = c.Labels["com.docker.compose.service"] || c.Names[0]?.replace("/", "") || "unknown";
-    const project = c.Labels["com.docker.compose.project"] || "standalone";
+    const project = c.Labels["com.docker.compose.project"] || "docker";
     const info = inspections[i] as any;
 
     // Extract network IPs

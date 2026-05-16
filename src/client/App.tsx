@@ -175,6 +175,33 @@ function Dashboard({ token }: { token: string }) {
   }, [token]);
   const handleAliasChangeRef = useRef(handleAliasChange);
   handleAliasChangeRef.current = handleAliasChange;
+
+  // Project colors — per-project hex color overrides for the group background.
+  const [projectColors, setProjectColors] = useState<Record<string, string>>({});
+  const handleColorChange = useCallback(async (project: string, color: string) => {
+    setProjectColors((prev) => {
+      const next = { ...prev };
+      if (color) next[project] = color;
+      else delete next[project];
+      return next;
+    });
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    try {
+      await fetch("/api/project-colors", {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({ project, color }),
+      });
+    } catch {
+      fetch("/api/project-colors", { headers })
+        .then((r) => r.ok ? r.json() : {})
+        .then(setProjectColors)
+        .catch(() => {});
+    }
+  }, [token]);
+  const handleColorChangeRef = useRef(handleColorChange);
+  handleColorChangeRef.current = handleColorChange;
   useEffect(() => {
     const headers: Record<string, string> = {};
     if (token) headers["Authorization"] = `Bearer ${token}`;
@@ -185,6 +212,10 @@ function Dashboard({ token }: { token: string }) {
     fetch("/api/project-aliases", { headers })
       .then((r) => r.ok ? r.json() : {})
       .then(setProjectAliases)
+      .catch(() => {});
+    fetch("/api/project-colors", { headers })
+      .then((r) => r.ok ? r.json() : {})
+      .then(setProjectColors)
       .catch(() => {});
     fetch("/api/discord-config", { headers })
       .then((r) => r.ok ? r.json() : null)
@@ -307,7 +338,7 @@ function Dashboard({ token }: { token: string }) {
         }
       }
 
-      // Keep leftmost child at MIN_X — build parent→children index once
+      // Build parent→children index once
       const childrenByParent = new Map<string, number[]>();
       for (let i = 0; i < nodes.length; i++) {
         const pid = nodes[i].parentId;
@@ -317,45 +348,61 @@ function Dashboard({ token }: { token: string }) {
         arr.push(i);
       }
 
-      for (const [gid, kidIdxs] of childrenByParent) {
-        let minChildX = Infinity;
-        for (const ki of kidIdxs) minChildX = Math.min(minChildX, nodes[ki].position.x);
-        if (minChildX !== MIN_X) {
-          const shift = minChildX - MIN_X;
-          changed = true;
-          for (let i = 0; i < nodes.length; i++) {
-            const n = nodes[i];
-            if (n.id === gid) nodes[i] = { ...n, position: { x: n.position.x + shift, y: n.position.y } };
-            else if (n.parentId === gid) nodes[i] = { ...n, position: { x: n.position.x - shift, y: n.position.y } };
-          }
-        }
+      // After every drag-end: re-center kids horizontally + vertically within
+      // their group, resize the group to fit, and shift the group on the
+      // canvas by the opposite of the kid shift so visible positions don't jump.
+      const FOOTER_RESERVE = 22;
+      const minW = NODE_W + G_PAD * 3;
+      const groupIdxById = new Map<string, number>();
+      for (let i = 0; i < nodes.length; i++) {
+        if (nodes[i].id.startsWith("group-")) groupIdxById.set(nodes[i].id, i);
       }
 
-      // Resize groups to fit children
-      for (let i = 0; i < nodes.length; i++) {
-        const n = nodes[i];
-        if (!n.id.startsWith("group-")) continue;
-        const kidIdxs = childrenByParent.get(n.id);
-        if (!kidIdxs || kidIdxs.length === 0) continue;
-
-        let maxRight = 0;
-        let maxBottom = 0;
+      for (const [gid, kidIdxs] of childrenByParent) {
+        if (kidIdxs.length === 0) continue;
+        let minLeft = Infinity, minTop = Infinity;
+        let maxRight = 0, maxBottom = 0;
         for (const ki of kidIdxs) {
           const k = nodes[ki];
-          maxRight = Math.max(maxRight, k.position.x + NODE_W + G_PAD);
-          maxBottom = Math.max(maxBottom, k.position.y + NODE_H + G_PAD);
+          minLeft = Math.min(minLeft, k.position.x);
+          maxRight = Math.max(maxRight, k.position.x + NODE_W);
+          minTop = Math.min(minTop, k.position.y);
+          maxBottom = Math.max(maxBottom, k.position.y + NODE_H);
+        }
+        const contentW = maxRight - minLeft;
+        const contentH = maxBottom - minTop;
+        const newW = Math.max(contentW + G_PAD * 2, minW);
+        const newH = GROUP_HEADER + G_PAD + contentH + G_PAD + FOOTER_RESERVE;
+        const targetLeft = (newW - contentW) / 2;
+        const targetTop = GROUP_HEADER + G_PAD;
+        const shiftX = targetLeft - minLeft;
+        const shiftY = targetTop - minTop;
+
+        if (shiftX !== 0 || shiftY !== 0) {
+          changed = true;
+          // Shift kids inside the group...
+          for (const ki of kidIdxs) {
+            const k = nodes[ki];
+            nodes[ki] = { ...k, position: { x: k.position.x + shiftX, y: k.position.y + shiftY } };
+          }
+          // ...and shift the group itself by the opposite so canvas-relative
+          // positions stay where the user just dropped them.
+          const gIdx = groupIdxById.get(gid);
+          if (gIdx !== undefined) {
+            const g = nodes[gIdx];
+            nodes[gIdx] = { ...g, position: { x: g.position.x - shiftX, y: g.position.y - shiftY } };
+          }
         }
 
-        const minW = NODE_W + G_PAD * 3;
-        const newW = Math.max(maxRight, minW);
-        const newH = Math.max(maxBottom, MIN_Y + NODE_H + G_PAD);
-
-        const curW = (n.style?.width as number) || 0;
-        const curH = (n.style?.height as number) || 0;
-
-        if (newW !== curW || newH !== curH) {
-          changed = true;
-          nodes[i] = { ...n, style: { ...n.style, width: newW, height: newH } };
+        const gIdx = groupIdxById.get(gid);
+        if (gIdx !== undefined) {
+          const g = nodes[gIdx];
+          const curW = (g.style?.width as number) || 0;
+          const curH = (g.style?.height as number) || 0;
+          if (newW !== curW || newH !== curH) {
+            changed = true;
+            nodes[gIdx] = { ...g, style: { ...g.style, width: newW, height: newH } };
+          }
         }
       }
 
@@ -419,31 +466,90 @@ function Dashboard({ token }: { token: string }) {
         const project = (n.data as any).project as string | undefined;
         if (project) {
           (n.data as any).alias = projectAliases[project];
+          (n.data as any).color = projectColors[project];
           (n.data as any).onAliasChange = handleAliasChangeRef.current;
+          (n.data as any).onColorChange = handleColorChangeRef.current;
+          // Apply custom color to group background/border. Falls back to the
+          // auto-assigned palette in buildLayout when not set.
+          const hex = projectColors[project];
+          if (hex) {
+            const r = parseInt(hex.slice(1, 3), 16);
+            const g = parseInt(hex.slice(3, 5), 16);
+            const b = parseInt(hex.slice(5, 7), 16);
+            n.style = {
+              ...n.style,
+              background: `rgba(${r}, ${g}, ${b}, 0.08)`,
+              border: `1px dashed rgba(${r}, ${g}, ${b}, 0.3)`,
+              color: `rgba(${r}, ${g}, ${b}, 0.8)`,
+            };
+          }
         }
       }
     }
 
     if (!initialLayoutDone.current) {
+      // Single-service groups can't be "arranged" — always honor the computed
+      // (centered) position from buildLayout, ignoring any stale saved value.
+      const servicesPerGroup = new Map<string, number>();
+      for (const n of newNodes) {
+        if (n.type === "service" && n.parentId) {
+          servicesPerGroup.set(n.parentId, (servicesPerGroup.get(n.parentId) || 0) + 1);
+        }
+      }
       let positioned = newNodes.map((n) => {
+        if (n.type === "service" && n.parentId && servicesPerGroup.get(n.parentId) === 1) {
+          return n;
+        }
         const saved = savedPositions.current[n.id];
         if (saved) return { ...n, position: saved };
         return n;
       });
-      positioned = positioned.map((n) => {
-        if (n.type !== "group") return n;
-        const kids = positioned.filter((c) => c.parentId === n.id);
-        if (kids.length === 0) return n;
-        let maxRight = 0;
-        let maxBottom = 0;
-        for (const k of kids) {
-          maxRight = Math.max(maxRight, k.position.x + NODE_W + G_PAD);
-          maxBottom = Math.max(maxBottom, k.position.y + NODE_H + G_PAD);
+      // Resize each group to fit its kids AND recenter content horizontally
+      // + vertically. We measure the bounding box of children, then shift them
+      // as a block so margins are symmetric on all four sides. Preserves the
+      // relative spacing between kids (a vertical stack stays a vertical stack,
+      // just centered). FOOTER_RESERVE accounts for the compose subtitle at
+      // the bottom of every group.
+      const FOOTER_RESERVE = 22;
+      const groupKids = new Map<string, Node[]>();
+      for (const n of positioned) {
+        if (n.type === "service" && n.parentId) {
+          if (!groupKids.has(n.parentId)) groupKids.set(n.parentId, []);
+          groupKids.get(n.parentId)!.push(n);
         }
+      }
+      const groupDims = new Map<string, { width: number; height: number; shiftX: number; shiftY: number }>();
+      for (const [groupId, kids] of groupKids) {
+        let minLeft = Infinity, minTop = Infinity;
+        let maxRight = 0, maxBottom = 0;
+        for (const k of kids) {
+          minLeft = Math.min(minLeft, k.position.x);
+          maxRight = Math.max(maxRight, k.position.x + NODE_W);
+          minTop = Math.min(minTop, k.position.y);
+          maxBottom = Math.max(maxBottom, k.position.y + NODE_H);
+        }
+        const contentW = maxRight - minLeft;
+        const contentH = maxBottom - minTop;
         const minW = NODE_W + G_PAD * 3;
-        const newW = Math.max(maxRight, minW);
-        const newH = Math.max(maxBottom, MIN_Y + NODE_H + G_PAD);
-        return { ...n, style: { ...n.style, width: newW, height: newH } };
+        const newW = Math.max(contentW + G_PAD * 2, minW);
+        const newH = GROUP_HEADER + G_PAD + contentH + G_PAD + FOOTER_RESERVE;
+        const shiftX = (newW - contentW) / 2 - minLeft;
+        const shiftY = (GROUP_HEADER + G_PAD) - minTop;
+        groupDims.set(groupId, { width: newW, height: newH, shiftX, shiftY });
+      }
+      positioned = positioned.map((n) => {
+        if (n.type === "service" && n.parentId) {
+          const dim = groupDims.get(n.parentId);
+          if (dim && (dim.shiftX !== 0 || dim.shiftY !== 0)) {
+            return { ...n, position: { x: n.position.x + dim.shiftX, y: n.position.y + dim.shiftY } };
+          }
+          return n;
+        }
+        if (n.type === "group") {
+          const dim = groupDims.get(n.id);
+          if (dim) return { ...n, style: { ...n.style, width: dim.width, height: dim.height } };
+        }
+        return n;
       });
       const { edges, activeHandles } = computeEdges(positioned, filteredConnections);
       for (const n of positioned) {
@@ -464,6 +570,17 @@ function Dashboard({ token }: { token: string }) {
         for (const nn of newNodes) {
           const existing = prevNodeMap.get(nn.id);
           if (existing) {
+            // For groups, accept the new style (color overrides live there)
+            // but preserve current width/height which may reflect a user drag.
+            if (nn.type === "group") {
+              const mergedStyle = {
+                ...nn.style,
+                width: (existing.style as any)?.width,
+                height: (existing.style as any)?.height,
+              };
+              result.push({ ...existing, data: nn.data, style: mergedStyle });
+              continue;
+            }
             // Keep position and style, update data
             result.push({ ...existing, data: nn.data });
           } else {
@@ -504,7 +621,7 @@ function Dashboard({ token }: { token: string }) {
         return result;
       });
     }
-  }, [filteredServices, filteredConnections, canInteract, containerSettings, globalThresholds, discordEnabled, projectAliases]);
+  }, [filteredServices, filteredConnections, canInteract, containerSettings, globalThresholds, discordEnabled, projectAliases, projectColors]);
 
   // Recompute edges + handles on drag end (not every pixel)
   const recomputeEdges = useCallback((currentNodes: Node[]) => {
