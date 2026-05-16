@@ -20,6 +20,12 @@ const en = {
   "filter.projects": "Projects",
   "filter.all": "All",
 
+  // Canvas controls
+  "controls.exportPng": "Export graph as PNG",
+  "controls.exportPng.empty": "No containers to export",
+  "controls.exportPng.tooLarge": "Graph is too large to export at full quality",
+  "controls.exportPng.failed": "Failed to export graph",
+
   // Login
   "login.connecting": "Connecting...",
   "login.connect": "Connect",
@@ -278,6 +284,12 @@ const es: Record<TranslationKey, string> = {
   // Filter
   "filter.projects": "Proyectos",
   "filter.all": "Todos",
+
+  // Canvas controls
+  "controls.exportPng": "Exportar grafo como PNG",
+  "controls.exportPng.empty": "No hay containers para exportar",
+  "controls.exportPng.tooLarge": "El grafo es muy grande para exportar en alta calidad",
+  "controls.exportPng.failed": "Error al exportar el grafo",
 
   // Login
   "login.connecting": "Conectando...",

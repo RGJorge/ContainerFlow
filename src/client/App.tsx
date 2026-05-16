@@ -24,6 +24,7 @@ import { NodeContextMenu } from "./components/NodeContextMenu";
 import { LoginScreen } from "./components/LoginScreen";
 import { OffsetEdge } from "./components/OffsetEdge";
 import { HeaderBar, type Page } from "./components/HeaderBar";
+import { ExportPngButton } from "./components/ExportPngButton";
 import { EdgeLegend } from "./components/EdgeLegend";
 import { ActionErrorToast } from "./components/ActionErrorToast";
 import { Wifi, WifiOff, ChevronDown, Check } from "lucide-react";
@@ -570,7 +571,7 @@ function Dashboard({ token }: { token: string }) {
       {activePage === "settings" && <SettingsPage projects={projects} servicesCount={services.length} token={token} />}
 
       {/* Canvas — inset (only visible on dashboard) */}
-      <div className={`flex-1 min-h-0 relative mx-2 mt-1 rounded-xl overflow-hidden ring-1 ring-slate-700/60 shadow-[inset_0_2px_12px_rgba(0,0,0,0.5)] ${activePage !== "dashboard" ? "hidden" : ""}`}>
+      <div id="dashboard-canvas" className={`flex-1 min-h-0 relative mx-2 mt-1 rounded-xl overflow-hidden ring-1 ring-slate-700/60 shadow-[inset_0_2px_12px_rgba(0,0,0,0.5)] ${activePage !== "dashboard" ? "hidden" : ""}`}>
         <ReactFlow
           onInit={(instance) => { reactFlowRef.current = instance; }}
           nodes={dimmedNodes}
@@ -641,7 +642,9 @@ function Dashboard({ token }: { token: string }) {
           proOptions={{ hideAttribution: true }}
         >
           <Background color="#374151" gap={30} size={2} />
-          <Controls position="bottom-left" />
+          <Controls position="bottom-left">
+            <ExportPngButton onError={(msg) => pushActionError("dashboard", "export", msg)} />
+          </Controls>
           <EdgeLegend />
           <MiniMap
             position="bottom-right"
@@ -659,7 +662,7 @@ function Dashboard({ token }: { token: string }) {
 
         {/* Project filter */}
         {projects.length > 1 && (
-          <div className="absolute top-3 right-3 z-10" ref={filterRef}>
+          <div data-no-export="true" className="absolute top-3 right-3 z-10" ref={filterRef}>
             <button
               onClick={() => setFilterOpen((v) => !v)}
               className="flex items-center gap-2 text-sm text-slate-400 bg-slate-800/80 backdrop-blur-sm hover:bg-slate-700/80 border border-slate-700/50 px-3 py-1.5 rounded-md transition-colors"

@@ -1,6 +1,6 @@
 {
   "name": "containerflow",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "license": "AGPL-3.0-or-later",
   "author": "Jorge Gonzalez D. (RGJorge)",
   "type": "module",
@@ -21,6 +21,7 @@
     "@modelcontextprotocol/sdk": "^1.27.1",
     "dockerode": "^4",
     "hono": "^4",
+    "html-to-image": "^1.11.13",
     "lucide-react": "^0.577.0",
     "yaml": "^2",
     "zod": "^3"
