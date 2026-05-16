@@ -1,6 +1,8 @@
 services:
   containerflow:
-    build: .
+    # Pulls the latest prebuilt image from GHCR.
+    # To build from source locally instead, see docker-compose.local.yml + COMPOSE_FILE in .env.
+    image: ghcr.io/rgjorge/containerflow:latest
     ports:
       - "${EXTERNAL_PORT:-9470}:9470"
     volumes:

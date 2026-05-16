@@ -1,0 +1,15 @@
+# Override compose file for local development / building from source.
+# Activated via COMPOSE_FILE env var in .env (see .env.example).
+#
+# Usage:
+#   1. In .env, set: COMPOSE_FILE=docker-compose.yml:docker-compose.local.yml
+#   2. Run: docker compose up -d --build
+#
+# This overrides the `image:` from docker-compose.yml with a local build,
+# tagging it as `containerflow:local` so it's distinguishable from
+# prebuilt versions.
+
+services:
+  containerflow:
+    build: .
+    image: containerflow:local

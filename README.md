@@ -29,16 +29,30 @@ Existing tools show you numbers. ContainerFlow also:
 
 ## Quick start
 
+No clone needed. Pull the prebuilt image from GHCR:
+
 ```bash
-git clone https://github.com/RGJorge/containerflow.git
-cd containerflow
+curl -O https://raw.githubusercontent.com/RGJorge/ContainerFlow/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/RGJorge/ContainerFlow/main/.env.example
 cp .env.example .env
 docker compose up -d
 ```
 
 Open `http://localhost:9470`. Done.
 
-For native development (hot reload): `bun install && bun run dev`.
+### Build from source instead
+
+If you cloned the repo and want to build locally (e.g. you modified the code):
+
+```bash
+git clone https://github.com/RGJorge/containerflow.git
+cd containerflow
+cp .env.example .env
+# In .env, uncomment: COMPOSE_FILE=docker-compose.yml:docker-compose.local.yml
+docker compose up -d --build
+```
+
+For native development (hot reload, no Docker): `bun install && bun run dev`.
 
 ## Documentation
 
