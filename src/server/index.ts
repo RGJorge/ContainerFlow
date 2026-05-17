@@ -10,6 +10,8 @@ import { loadDiscordConfig, saveDiscordConfig, notifyStateChange, notifyResource
 import { loadContainerSettings, saveContainerSettings } from "./container-settings";
 import { loadProjectAliases, saveProjectAliases, sanitizeAlias } from "./project-aliases";
 import { loadProjectColors, saveProjectColors, sanitizeColor } from "./project-colors";
+import { getUpdateInfo } from "./update-check";
+import pkg from "../../package.json";
 import { initStatsDB, insertStats, getStatsHistory, getAllServicesStatsHistory } from "./stats-db";
 import { initEventsDB, insertEvent, insertNotification, getEvents, getNotifications, type EventLogEntry, type NotificationLogEntry } from "./events-db";
 import type { Service, Stats, WSMessage, DiscordConfig, ContainerSettings, StatsRange } from "../shared/types";
@@ -206,7 +208,13 @@ app.get("/api/init", async (c) => {
   // the dashboard. The first regular poll (within ~3s) populates via WS.
   const projectAliases = loadProjectAliases();
   const projectColors = loadProjectColors();
-  return c.json({ services, connections, positions, stats: lastStats, projectAliases, projectColors });
+  // Update info: best-effort, never block init. If the check fails (offline,
+  // rate-limit), return null so the UI just doesn't show a notification.
+  let updateInfo = null;
+  try {
+    updateInfo = await getUpdateInfo(pkg.version);
+  } catch {}
+  return c.json({ services, connections, positions, stats: lastStats, projectAliases, projectColors, updateInfo });
 });
 
 // ── Server config (read by frontend to disable buttons for non-allowed paths) ──
@@ -690,6 +698,28 @@ app.delete("/api/project-colors/:project", (c) => {
   delete colors[project];
   saveProjectColors(colors);
   return c.json({ ok: true });
+});
+
+// ── Update info ──
+app.get("/api/update-info", async (c) => {
+  try {
+    const info = await getUpdateInfo(pkg.version);
+    return c.json(info);
+  } catch {
+    // Silent fallback — never error the client with this metadata call.
+    return c.json({
+      current: pkg.version,
+      latest: null,
+      updateAvailable: false,
+      releasesAhead: 0,
+      releaseUrl: null,
+      repoUrl: "https://github.com/RGJorge/ContainerFlow",
+      releaseNotes: null,
+      publishedAt: null,
+      deployMode: "unknown",
+      stars: null,
+    });
+  }
 });
 
 // ── Stats history ──

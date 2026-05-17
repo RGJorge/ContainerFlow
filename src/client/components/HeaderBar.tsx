@@ -6,6 +6,8 @@ import {
 } from "lucide-react";
 import type { Service, DockerEvent, NotificationLogEntry } from "../../shared/types";
 import { useT } from "../i18n";
+import { useUpdateInfo } from "../hooks/useUpdateInfo";
+import { UpdateModal } from "./UpdateModal";
 
 export type Page = "dashboard" | "monitoring" | "settings";
 
@@ -191,6 +193,8 @@ export function HeaderBar({
   onOpenServiceDetail,
 }: HeaderBarProps) {
   const { t, lang, setLang } = useT();
+  const { info: updateInfo, showIndicator } = useUpdateInfo(token);
+  const [updateOpen, setUpdateOpen] = useState(false);
 
   return (
     <div className="flex items-center justify-between px-5 py-1 bg-slate-900/90 backdrop-blur-sm relative z-[9999]">
@@ -201,7 +205,8 @@ export function HeaderBar({
         <NavButton icon={Settings} label={t("header.settings")} active={activePage === "settings"} onClick={() => onPageChange("settings")} />
       </nav>
 
-      {/* Center: Logo */}
+      {/* Center: Logo. The "subtitle" line shows the current version normally,
+          but is replaced by the "update available" badge when an update ships. */}
       <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2.5">
         <img
           src="/alteonx-logo.webp"
@@ -211,7 +216,21 @@ export function HeaderBar({
         />
         <div className="flex flex-col items-end">
           <span className="text-base font-bold text-white tracking-wide">ContainerFlow</span>
-          <span className="text-[9px] text-slate-500 font-mono -mt-1">v{__APP_VERSION__}</span>
+          {showIndicator && updateInfo?.latest ? (
+            <button
+              onClick={() => setUpdateOpen(true)}
+              className="flex items-center gap-1 text-[9px] font-semibold uppercase tracking-wider text-emerald-400 hover:text-emerald-300 transition-colors whitespace-nowrap -mt-1 animate-pulse hover:animate-none"
+              title={`v${updateInfo.current} → v${updateInfo.latest}`}
+            >
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-400" />
+              </span>
+              {t("update.available")}
+            </button>
+          ) : (
+            <span className="text-[9px] text-slate-500 font-mono -mt-1">v{__APP_VERSION__}</span>
+          )}
         </div>
       </div>
 
@@ -267,6 +286,13 @@ export function HeaderBar({
           </button>
         )}
       </div>
+
+      {updateOpen && updateInfo && (
+        <UpdateModal
+          info={updateInfo}
+          onClose={() => setUpdateOpen(false)}
+        />
+      )}
     </div>
   );
 }

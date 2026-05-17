@@ -34,6 +34,21 @@ const en = {
   "group.changeColor": "Change color",
   "group.resetColor": "Reset color",
 
+  // Update notification
+  "update.available": "Update available",
+  "update.whatsNew": "What's new",
+  "update.howToUpdate": "How to update",
+  "update.tabGhcr": "Prebuilt image",
+  "update.tabSource": "Local build",
+  "update.ghcrHint": "If you pulled the image from GitHub Container Registry.",
+  "update.sourceHint": "If you cloned the repo and build from source.",
+  "update.detectedMode": "Detected",
+  "update.copyCommand": "Copy command",
+  "update.copied": "Copied",
+  "update.fullNotes": "See full release notes",
+  "update.viewRepo": "View on GitHub",
+  "update.releasesBehind": "{n} versions behind",
+
   // Login
   "login.connecting": "Connecting...",
   "login.connect": "Connect",
@@ -305,6 +320,21 @@ const es: Record<TranslationKey, string> = {
   "group.saveAlias": "Guardar",
   "group.changeColor": "Cambiar color",
   "group.resetColor": "Restaurar color",
+
+  // Update notification
+  "update.available": "Nueva versión",
+  "update.whatsNew": "Qué hay de nuevo",
+  "update.howToUpdate": "Cómo actualizar",
+  "update.tabGhcr": "Imagen prebuilt",
+  "update.tabSource": "Build local",
+  "update.ghcrHint": "Si descargaste la imagen desde GitHub Container Registry.",
+  "update.sourceHint": "Si clonaste el repo y construís desde código fuente.",
+  "update.detectedMode": "Detectado",
+  "update.copyCommand": "Copiar comando",
+  "update.copied": "Copiado",
+  "update.fullNotes": "Ver notas completas",
+  "update.viewRepo": "Ver repositorio",
+  "update.releasesBehind": "{n} versiones atrás",
   "group.cancelAlias": "Cancelar",
 
   // Login

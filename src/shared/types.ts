@@ -131,6 +131,21 @@ export interface ServerConfig {
   restrictedMode: boolean;
 }
 
+export type DeployMode = "ghcr" | "source" | "unknown";
+
+export interface UpdateInfo {
+  current: string;
+  latest: string | null;
+  updateAvailable: boolean;
+  releasesAhead: number;
+  releaseUrl: string | null;
+  repoUrl: string;
+  releaseNotes: string | null;
+  publishedAt: string | null;
+  deployMode: DeployMode;
+  stars: number | null;
+}
+
 export interface EventLogEntry {
   id: number;
   timestamp: number;
