@@ -182,6 +182,54 @@ async function collectComposeOutput(stream: ReadableStream<Uint8Array> | null, j
   }
 }
 
+function runComposeCommand(composeFile: string, args: string[], uid: string, action: string): ComposeActionJob {
+  const envArgs = findEnvFileArgs(composeFile);
+  const composeArgs = [...envArgs, ...args];
+  const command = ["docker", "compose", "-f", composeFile, ...composeArgs];
+  const job = createComposeActionJob(action, uid, command);
+  const proc = spawnDockerCompose(composeFile, composeArgs);
+  const stdoutDone = collectComposeOutput(proc.stdout as any, job);
+  const stderrDone = collectComposeOutput(proc.stderr as any, job);
+
+  proc.exited.then(async (exitCode) => {
+    await Promise.allSettled([stdoutDone, stderrDone]);
+    job.exitCode = exitCode;
+    job.finishedAt = Date.now();
+    if (exitCode !== 0) {
+      job.status = "error";
+      const errorMsg = job.output.trim() || `${action} failed with exit code ${exitCode}`;
+      broadcast({ type: "action_error", data: { uid, action, error: errorMsg } });
+      try { notifyActionError(uid, action, errorMsg, loadDiscordConfig()); } catch {}
+    } else {
+      job.status = "success";
+      try { notifyUIAction(uid, action, loadDiscordConfig()); } catch {}
+    }
+    scheduleRefresh();
+  }).catch((err) => {
+    job.status = "error";
+    job.exitCode = -1;
+    job.finishedAt = Date.now();
+    const errorMsg = err?.message || `${action} failed`;
+    job.output += `\n${errorMsg}\n`;
+    broadcast({ type: "action_error", data: { uid, action, error: errorMsg } });
+    try { notifyActionError(uid, action, errorMsg, loadDiscordConfig()); } catch {}
+  });
+
+  return job;
+}
+
+function runComposeUp(composeFile: string, args: string[], uid: string, action: string): ComposeActionJob {
+  return runComposeCommand(composeFile, ["up", "-d", ...args], uid, action);
+}
+
+function runComposeStop(composeFile: string, uid: string, action: string): ComposeActionJob {
+  return runComposeCommand(composeFile, ["stop"], uid, action);
+}
+
+function runComposeDown(composeFile: string, uid: string, action: string): ComposeActionJob {
+  return runComposeCommand(composeFile, ["down", "--remove-orphans"], uid, action);
+}
+
 const app = new Hono();
 
 // ── Compression ──
@@ -344,41 +392,6 @@ function checkComposeFileAccess(composeFile: string): string | null {
   return null;
 }
 
-function runComposeUp(composeFile: string, args: string[], uid: string, action: string): ComposeActionJob {
-  const envArgs = findEnvFileArgs(composeFile);
-  const composeArgs = [...envArgs, "up", "-d", ...args];
-  const command = ["docker", "compose", "-f", composeFile, ...composeArgs];
-  const job = createComposeActionJob(action, uid, command);
-  const proc = spawnDockerCompose(composeFile, composeArgs);
-  const stdoutDone = collectComposeOutput(proc.stdout as any, job);
-  const stderrDone = collectComposeOutput(proc.stderr as any, job);
-
-  proc.exited.then(async (exitCode) => {
-    await Promise.allSettled([stdoutDone, stderrDone]);
-    job.exitCode = exitCode;
-    job.finishedAt = Date.now();
-    if (exitCode !== 0) {
-      job.status = "error";
-      const errorMsg = job.output.trim() || `${action} failed with exit code ${exitCode}`;
-      broadcast({ type: "action_error", data: { uid, action, error: errorMsg } });
-      try { notifyActionError(uid, action, errorMsg, loadDiscordConfig()); } catch {}
-    } else {
-      job.status = "success";
-      try { notifyUIAction(uid, action, loadDiscordConfig()); } catch {}
-    }
-    scheduleRefresh();
-  }).catch((err) => {
-    job.status = "error";
-    job.exitCode = -1;
-    job.finishedAt = Date.now();
-    const errorMsg = err?.message || `${action} failed`;
-    job.output += `\n${errorMsg}\n`;
-    broadcast({ type: "action_error", data: { uid, action, error: errorMsg } });
-    try { notifyActionError(uid, action, errorMsg, loadDiscordConfig()); } catch {}
-  });
-  return job;
-}
-
 app.get("/api/compose-library/jobs/:id", (c) => {
   const job = composeActionJobs.get(c.req.param("id"));
   if (!job) return c.json({ error: "Compose action job not found" }, 404);
@@ -431,6 +444,48 @@ app.post("/api/compose-library/up-stack", async (c) => {
     return c.json({ ok: true, jobId: job.id });
   } catch (err: any) {
     return c.json({ error: err?.message || "Failed to start compose stack" }, 500);
+  }
+});
+
+app.post("/api/compose-library/stop-stack", async (c) => {
+  try {
+    const parsed = validateComposeActionBody(await c.req.json());
+    if (typeof parsed === "string") return c.json({ error: parsed }, 400);
+
+    const denied = checkComposeFileAccess(parsed.composeFile);
+    if (denied) {
+      if (RESTRICTED_MODE && !isPathAllowed(parsed.composeFile)) return c.json({ error: denied }, 403);
+      return c.json({ error: denied }, 400);
+    }
+
+    const stack = buildStack(parsed.composeFile, [], isPathAllowed, COMPOSE_SCAN_PATHS);
+    if (stack.error) return c.json({ error: stack.error }, 400);
+
+    const job = runComposeStop(parsed.composeFile, stack.project, "stop-stack");
+    return c.json({ ok: true, jobId: job.id });
+  } catch (err: any) {
+    return c.json({ error: err?.message || "Failed to stop compose stack" }, 500);
+  }
+});
+
+app.post("/api/compose-library/delete-stack", async (c) => {
+  try {
+    const parsed = validateComposeActionBody(await c.req.json());
+    if (typeof parsed === "string") return c.json({ error: parsed }, 400);
+
+    const denied = checkComposeFileAccess(parsed.composeFile);
+    if (denied) {
+      if (RESTRICTED_MODE && !isPathAllowed(parsed.composeFile)) return c.json({ error: denied }, 403);
+      return c.json({ error: denied }, 400);
+    }
+
+    const stack = buildStack(parsed.composeFile, [], isPathAllowed, COMPOSE_SCAN_PATHS);
+    if (stack.error) return c.json({ error: stack.error }, 400);
+
+    const job = runComposeDown(parsed.composeFile, stack.project, "delete-stack");
+    return c.json({ ok: true, jobId: job.id });
+  } catch (err: any) {
+    return c.json({ error: err?.message || "Failed to delete compose stack" }, 500);
   }
 });
 

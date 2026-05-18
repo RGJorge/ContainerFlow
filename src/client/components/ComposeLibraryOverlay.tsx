@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, ChevronDown, FileStack, Layers, Lock, Play, RefreshCw, Search, X } from "lucide-react";
+import { CheckCircle2, ChevronDown, FileStack, Layers, Lock, Play, RefreshCw, Search, Square, Trash2, X } from "lucide-react";
 import type { ComposeLibraryStack, ComposeLibraryService } from "../../shared/types";
 
 interface ComposeLibraryResponse {
@@ -54,6 +54,7 @@ export function ComposeLibraryOverlay({ token }: ComposeLibraryOverlayProps) {
   const [successCloseIn, setSuccessCloseIn] = useState<number | null>(null);
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
   const actionLogRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const ref = useRef<HTMLDivElement>(null);
 
   const headers = useCallback((json = false): Record<string, string> => {
@@ -99,12 +100,22 @@ export function ComposeLibraryOverlay({ token }: ComposeLibraryOverlayProps) {
   }, [open, data, loading, load]);
 
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
+    if (!open) return;
+    const id = window.requestAnimationFrame(() => {
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select?.();
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: PointerEvent) => {
       if (ref.current && !ref.current.contains(e.target as HTMLElement)) setOpen(false);
     };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
+    document.addEventListener("pointerdown", handler, true);
+    return () => document.removeEventListener("pointerdown", handler, true);
+  }, [open]);
 
   const filteredStacks = useMemo(() => {
     const stacks = data?.stacks || [];
@@ -208,13 +219,13 @@ export function ComposeLibraryOverlay({ token }: ComposeLibraryOverlayProps) {
       });
   }, [headers, load]);
 
-  const runAction = async (endpoint: string, body: Record<string, string>, busyKey: string) => {
+  const runAction = async (endpoint: string, body: Record<string, string>, busyKey: string, action: string) => {
     setBusyKey(busyKey);
     setError(null);
     setSuccessCloseIn(null);
     setActionJob({
       id: "",
-      action: busyKey.endsWith(":stack") ? "up-stack" : "up-service",
+      action,
       uid: busyKey,
       command: [],
       status: "running",
@@ -293,6 +304,7 @@ export function ComposeLibraryOverlay({ token }: ComposeLibraryOverlayProps) {
               <div className="flex min-w-0 flex-1 items-center gap-2 rounded-md border border-slate-700 bg-slate-950/50 px-2.5 py-1.5">
                 <Search size={14} className="text-slate-500 shrink-0" />
                 <input
+                  ref={searchInputRef}
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Search stacks, paths, services, images"
@@ -389,77 +401,114 @@ export function ComposeLibraryOverlay({ token }: ComposeLibraryOverlayProps) {
                     </div>
                   </button>
                   {expandedProjects.has(group.project) && group.stacks.map((stack) => {
-                    const stackBusy = busyKey === `${stack.compose_file}:stack`;
                     const title = stack.variant || stack.project;
                     const subtitle = stack.variant ? stack.compose_file : pathLabel(stack.compose_file);
-                return (
-                  <div key={stack.compose_file} className="border-b border-slate-800 last:border-b-0">
-                    <div className="flex items-center justify-between gap-3 bg-slate-900 px-4 py-3">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          {stack.locked ? <Lock size={13} className="text-slate-500" /> : <CheckCircle2 size={13} className="text-emerald-400" />}
-                          <span className="truncate text-sm font-semibold text-slate-100">{title}</span>
-                          <span className="rounded border border-slate-700 px-1.5 py-0.5 text-[10px] uppercase text-slate-500">{stack.host}</span>
+                    return (
+                      <div key={stack.compose_file} className="border-b border-slate-800 last:border-b-0">
+                        <div className="flex items-center justify-between gap-3 bg-slate-900 px-4 py-3">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              {stack.locked ? <Lock size={13} className="text-slate-500" /> : <CheckCircle2 size={13} className="text-emerald-400" />}
+                              <span className="truncate text-sm font-semibold text-slate-100">{title}</span>
+                              <span className="rounded border border-slate-700 px-1.5 py-0.5 text-[10px] uppercase text-slate-500">{stack.host}</span>
+                            </div>
+                            <div className="mt-1 truncate font-mono text-[11px] text-slate-500" title={stack.compose_file}>{subtitle}</div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <div className="hidden md:flex items-center gap-1.5 text-[11px] text-slate-500">
+                              <span className="text-emerald-400">{stack.counts.running}</span>
+                              <span>running</span>
+                              <span className="text-slate-700">/</span>
+                              <span>{stack.services.length}</span>
+                            </div>
+                            <button
+                              onClick={() => runAction("/api/compose-library/up-stack", { host: stack.host, composeFile: stack.compose_file }, `${stack.compose_file}:up-stack`, "up-stack")}
+                              disabled={stack.locked || !!stack.error || !!busyKey}
+                              className="flex items-center justify-center rounded bg-cyan-500/15 p-1.5 text-cyan-300 hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:opacity-40"
+                              title={stack.locked ? "Outside ALLOWED_PATHS" : "docker compose up -d"}
+                              aria-label={stack.locked ? "Outside ALLOWED_PATHS" : `Up stack ${title}`}
+                            >
+                              {busyKey === `${stack.compose_file}:up-stack` ? <RefreshCw size={12} className="animate-spin" /> : <Play size={12} />}
+                            </button>
+                            <button
+                              onClick={() => runAction("/api/compose-library/stop-stack", { host: stack.host, composeFile: stack.compose_file }, `${stack.compose_file}:stop-stack`, "stop-stack")}
+                              disabled={stack.locked || !!stack.error || !!busyKey}
+                              className="flex items-center justify-center rounded bg-slate-800 p-1.5 text-slate-200 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+                              title={stack.locked ? "Outside ALLOWED_PATHS" : "docker compose stop"}
+                              aria-label={stack.locked ? "Outside ALLOWED_PATHS" : `Stop stack ${title}`}
+                            >
+                              {busyKey === `${stack.compose_file}:stop-stack` ? <RefreshCw size={12} className="animate-spin" /> : <Square size={11} />}
+                            </button>
+                            <button
+                              onClick={() => {
+                                if (window.confirm(`Down stack "${title}"? This removes the compose containers and network.`)) {
+                                  runAction("/api/compose-library/delete-stack", { host: stack.host, composeFile: stack.compose_file }, `${stack.compose_file}:delete-stack`, "delete-stack");
+                                }
+                              }}
+                              disabled={stack.locked || !!stack.error || !!busyKey}
+                              className="flex items-center justify-center rounded bg-red-500/10 p-1.5 text-red-300 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                              title={stack.locked ? "Outside ALLOWED_PATHS" : "docker compose down --remove-orphans"}
+                              aria-label={stack.locked ? "Outside ALLOWED_PATHS" : `Down stack ${title}`}
+                            >
+                              {busyKey === `${stack.compose_file}:delete-stack` ? <RefreshCw size={12} className="animate-spin" /> : <Trash2 size={11} />}
+                            </button>
+                            <ChevronDown size={14} className="text-slate-600" />
+                          </div>
                         </div>
-                        <div className="mt-1 truncate font-mono text-[11px] text-slate-500" title={stack.compose_file}>{subtitle}</div>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <div className="hidden md:flex items-center gap-1.5 text-[11px] text-slate-500">
-                          <span className="text-emerald-400">{stack.counts.running}</span>
-                          <span>running</span>
-                          <span className="text-slate-700">/</span>
-                          <span>{stack.services.length}</span>
-                        </div>
-                        <button
-                          onClick={() => runAction("/api/compose-library/up-stack", { host: stack.host, composeFile: stack.compose_file }, `${stack.compose_file}:stack`)}
-                          disabled={stack.locked || !!stack.error || !!busyKey}
-                          className="flex items-center gap-1.5 rounded bg-cyan-500/15 px-2.5 py-1.5 text-xs font-medium text-cyan-300 hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:opacity-40"
-                          title={stack.locked ? "Outside ALLOWED_PATHS" : "docker compose up -d"}
-                        >
-                          {stackBusy ? <RefreshCw size={12} className="animate-spin" /> : <Play size={12} />}
-                          Up Stack
-                        </button>
-                        <ChevronDown size={14} className="text-slate-600" />
-                      </div>
-                    </div>
-                    {stack.error ? (
-                      <div className="px-4 pb-3 text-xs text-red-300">{stack.error}</div>
-                    ) : (
-                      <div className="px-4 pb-3">
-                        <div className="overflow-hidden rounded-md border border-slate-800">
-                          {stack.services.map((svc) => {
-                            const key = `${stack.compose_file}:${svc.name}`;
-                            const serviceBusy = busyKey === key;
-                            const disabled = stack.locked || svc.profiles.length > 0 || !!busyKey;
-                            return (
-                              <div key={svc.name} className="grid grid-cols-[minmax(0,1fr)_120px_88px] items-center gap-3 border-b border-slate-800 bg-slate-950/30 px-3 py-2 last:border-b-0">
-                                <div className="min-w-0">
-                                  <div className="truncate text-sm text-slate-200">{svc.name}</div>
-                                  <div className="truncate text-[11px] text-slate-500" title={svc.image || "No image tag"}>
-                                    {svc.image || "No image tag"}
-                                    {svc.profiles.length > 0 && <span className="ml-2 text-amber-400">profile: {svc.profiles.join(", ")}</span>}
-                                  </div>
-                                </div>
-                                <span className={`justify-self-start rounded border px-2 py-1 text-[11px] ${stateClasses[svc.state]}`}>
-                                  {stateLabel(svc.state)}
-                                </span>
-                                <button
-                                  onClick={() => runAction("/api/compose-library/up-service", { host: stack.host, composeFile: stack.compose_file, service: svc.name }, key)}
-                                  disabled={disabled}
-                                  className="flex items-center justify-center gap-1.5 rounded bg-slate-800 px-2 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
-                                  title={svc.profiles.length > 0 ? "Profile selection is not available yet" : stack.locked ? "Outside ALLOWED_PATHS" : "docker compose up -d service"}
-                                >
-                                  {serviceBusy ? <RefreshCw size={12} className="animate-spin" /> : <Play size={12} />}
-                                  Up
-                                </button>
+                        {stack.error ? (
+                          <div className="px-4 pb-3 text-xs text-red-300">{stack.error}</div>
+                        ) : (
+                          <div className="px-4 pb-3">
+                              <div className="overflow-hidden rounded-md border border-slate-800">
+                                {stack.services.map((svc) => {
+                                  const key = `${stack.compose_file}:${svc.name}`;
+                                  const canStop = svc.state === "running" && !!svc.container_id;
+                                  const upBusy = busyKey === `${key}:up`;
+                                  const stopBusy = busyKey === `${key}:stop`;
+                                  const disabled = stack.locked || svc.profiles.length > 0 || !!busyKey;
+                                  return (
+                                    <div key={svc.name} className="grid grid-cols-[minmax(0,1fr)_120px_88px] items-center gap-3 border-b border-slate-800 bg-slate-950/30 px-3 py-2 last:border-b-0">
+                                      <div className="min-w-0">
+                                        <div className="truncate text-sm text-slate-200">{svc.name}</div>
+                                        <div className="truncate text-[11px] text-slate-500" title={svc.image || "No image tag"}>
+                                          {svc.image || "No image tag"}
+                                          {svc.profiles.length > 0 && <span className="ml-2 text-amber-400">profile: {svc.profiles.join(", ")}</span>}
+                                        </div>
+                                      </div>
+                                      <span className={`justify-self-start rounded border px-2 py-1 text-[11px] ${stateClasses[svc.state]}`}>
+                                        {stateLabel(svc.state)}
+                                      </span>
+                                      <div className="flex justify-self-end items-center gap-1.5">
+                                        <button
+                                          onClick={() => runAction("/api/compose-library/up-service", { host: stack.host, composeFile: stack.compose_file, service: svc.name }, `${key}:up`, "up-service")}
+                                          disabled={disabled}
+                                          className="flex items-center justify-center rounded bg-slate-800 p-1.5 text-slate-200 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+                                          title={svc.profiles.length > 0 ? "Profile selection is not available yet" : stack.locked ? "Outside ALLOWED_PATHS" : "docker compose up -d service"}
+                                          aria-label={svc.profiles.length > 0 ? "Profile selection is not available yet" : stack.locked ? "Outside ALLOWED_PATHS" : `Up service ${svc.name}`}
+                                        >
+                                          {upBusy ? <RefreshCw size={12} className="animate-spin" /> : <Play size={12} />}
+                                        </button>
+                                        <button
+                                          onClick={() => {
+                                            if (!svc.container_id) return;
+                                            runAction(`/api/containers/${svc.container_id}/stop`, { host: stack.host, composeFile: stack.compose_file, service: svc.name }, `${key}:stop`, "stop");
+                                          }}
+                                          disabled={stack.locked || !canStop || !!busyKey}
+                                          className="flex items-center justify-center rounded bg-red-500/10 p-1.5 text-red-300 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                                          title={stack.locked ? "Outside ALLOWED_PATHS" : canStop ? "docker stop" : "Service is not running"}
+                                          aria-label={stack.locked ? "Outside ALLOWED_PATHS" : `Stop service ${svc.name}`}
+                                        >
+                                          {stopBusy ? <RefreshCw size={12} className="animate-spin" /> : <Square size={11} />}
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
                               </div>
-                            );
-                          })}
-                        </div>
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                );
+                    );
                   })}
                 </div>
               ))
