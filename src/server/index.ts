@@ -14,6 +14,7 @@ import { getUpdateInfo } from "./update-check";
 import pkg from "../../package.json";
 import { initStatsDB, insertStats, getStatsHistory, getAllServicesStatsHistory } from "./stats-db";
 import { initEventsDB, insertEvent, insertNotification, getEvents, getNotifications, type EventLogEntry, type NotificationLogEntry } from "./events-db";
+import { buildStack, buildComposeLibrary, findComposeFiles, parseScanPaths } from "./compose-library";
 import type { Service, Stats, WSMessage, DiscordConfig, ContainerSettings, StatsRange } from "../shared/types";
 
 /** Directory for persistent data files (SQLite, JSON configs, positions).
@@ -35,6 +36,9 @@ const ALLOW_NON_COMPOSE = process.env.ALLOW_NON_COMPOSE === "true";
 
 /** Strict mode is active when ALLOWED_PATHS has at least one entry. */
 const RESTRICTED_MODE = ALLOWED_PATHS.length > 0;
+
+/** Directories scanned for compose files that may not currently have containers. */
+const COMPOSE_SCAN_PATHS = parseScanPaths(process.env.COMPOSE_SCAN_PATHS || "");
 
 /** Returns true if filePath is under one of the allowed prefixes. */
 function isPathAllowed(filePath: string): boolean {
@@ -99,6 +103,131 @@ function findEnvFileArgs(composeFile: string): string[] {
     }
   }
   return [];
+}
+
+function dockerComposeEnv(): Record<string, string> {
+  const keep = [
+    "PATH",
+    "HOME",
+    "DOCKER_HOST",
+    "DOCKER_CONTEXT",
+    "DOCKER_TLS_VERIFY",
+    "DOCKER_CERT_PATH",
+    "XDG_CONFIG_HOME",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+  ];
+  const env: Record<string, string> = {};
+  for (const key of keep) {
+    const value = process.env[key];
+    if (value) env[key] = value;
+  }
+  return env;
+}
+
+function spawnDockerCompose(composeFile: string, args: string[]) {
+  return Bun.spawn(["docker", "compose", "-f", composeFile, ...args], {
+    cwd: path.dirname(composeFile),
+    env: dockerComposeEnv(),
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+}
+
+interface ComposeActionJob {
+  id: string;
+  action: string;
+  uid: string;
+  command: string[];
+  status: "running" | "success" | "error";
+  output: string;
+  exitCode: number | null;
+  startedAt: number;
+  finishedAt: number | null;
+}
+
+const composeActionJobs = new Map<string, ComposeActionJob>();
+
+function createComposeActionJob(action: string, uid: string, command: string[]): ComposeActionJob {
+  const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const job: ComposeActionJob = {
+    id,
+    action,
+    uid,
+    command,
+    status: "running",
+    output: `$ ${command.join(" ")}\n`,
+    exitCode: null,
+    startedAt: Date.now(),
+    finishedAt: null,
+  };
+  composeActionJobs.set(id, job);
+  return job;
+}
+
+async function collectComposeOutput(stream: ReadableStream<Uint8Array> | null, job: ComposeActionJob) {
+  if (!stream) return;
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) job.output += decoder.decode(value, { stream: true });
+    }
+    job.output += decoder.decode();
+  } catch (err: any) {
+    job.output += `\n[log stream error] ${err?.message || err}\n`;
+  }
+}
+
+function runComposeCommand(composeFile: string, args: string[], uid: string, action: string): ComposeActionJob {
+  const envArgs = findEnvFileArgs(composeFile);
+  const composeArgs = [...envArgs, ...args];
+  const command = ["docker", "compose", "-f", composeFile, ...composeArgs];
+  const job = createComposeActionJob(action, uid, command);
+  const proc = spawnDockerCompose(composeFile, composeArgs);
+  const stdoutDone = collectComposeOutput(proc.stdout as any, job);
+  const stderrDone = collectComposeOutput(proc.stderr as any, job);
+
+  proc.exited.then(async (exitCode) => {
+    await Promise.allSettled([stdoutDone, stderrDone]);
+    job.exitCode = exitCode;
+    job.finishedAt = Date.now();
+    if (exitCode !== 0) {
+      job.status = "error";
+      const errorMsg = job.output.trim() || `${action} failed with exit code ${exitCode}`;
+      broadcast({ type: "action_error", data: { uid, action, error: errorMsg } });
+      try { notifyActionError(uid, action, errorMsg, loadDiscordConfig()); } catch {}
+    } else {
+      job.status = "success";
+      try { notifyUIAction(uid, action, loadDiscordConfig()); } catch {}
+    }
+    scheduleRefresh();
+  }).catch((err) => {
+    job.status = "error";
+    job.exitCode = -1;
+    job.finishedAt = Date.now();
+    const errorMsg = err?.message || `${action} failed`;
+    job.output += `\n${errorMsg}\n`;
+    broadcast({ type: "action_error", data: { uid, action, error: errorMsg } });
+    try { notifyActionError(uid, action, errorMsg, loadDiscordConfig()); } catch {}
+  });
+
+  return job;
+}
+
+function runComposeUp(composeFile: string, args: string[], uid: string, action: string): ComposeActionJob {
+  return runComposeCommand(composeFile, ["up", "-d", ...args], uid, action);
+}
+
+function runComposeStop(composeFile: string, uid: string, action: string): ComposeActionJob {
+  return runComposeCommand(composeFile, ["stop"], uid, action);
+}
+
+function runComposeDown(composeFile: string, uid: string, action: string): ComposeActionJob {
+  return runComposeCommand(composeFile, ["down", "--remove-orphans"], uid, action);
 }
 
 const app = new Hono();
@@ -226,12 +355,139 @@ app.get("/api/config", (c) => {
   });
 });
 
+app.get("/api/compose-library", async (c) => {
+  try {
+    const services = await discoverServices(true, []);
+    const composeFiles = findComposeFiles(COMPOSE_SCAN_PATHS);
+    const stacks = buildComposeLibrary(composeFiles, services, isPathAllowed, COMPOSE_SCAN_PATHS);
+    return c.json({ host: "local", scanPaths: COMPOSE_SCAN_PATHS, stacks });
+  } catch (err: any) {
+    return c.json({ error: err?.message || "Failed to scan compose library" }, 500);
+  }
+});
+
 // ── Helper: get service uid from container inspect info ──
 function getContainerUid(info: any): string {
   const project = info.Config?.Labels?.["com.docker.compose.project"] || "docker";
   const service = info.Config?.Labels?.["com.docker.compose.service"] || info.Name?.replace(/^\//, "") || "unknown";
   return `${project}/${service}`;
 }
+
+function validateComposeActionBody(body: any): { host: string; composeFile: string; service?: string } | string {
+  if (!body || typeof body !== "object") return "Missing request body";
+  if (body.host !== "local") return "Only host \"local\" is supported in this version";
+  if (!body.composeFile || typeof body.composeFile !== "string") return "Missing composeFile";
+  if (body.service !== undefined && typeof body.service !== "string") return "Invalid service";
+  return { host: "local", composeFile: path.resolve(body.composeFile), service: body.service };
+}
+
+function checkComposeFileAccess(composeFile: string): string | null {
+  if (!fs.existsSync(composeFile)) {
+    const dir = path.dirname(composeFile);
+    return `Compose file not accessible from ContainerFlow:\n  ${composeFile}\n\nFix: mount this path into ContainerFlow:\n  - ${dir}:${dir}:ro`;
+  }
+  if (!isPathAllowed(composeFile)) {
+    return `Compose file is outside ALLOWED_PATHS:\n  ${composeFile}\n\nAllowed paths:\n${ALLOWED_PATHS.map((p) => `  ${p}`).join("\n")}`;
+  }
+  return null;
+}
+
+app.get("/api/compose-library/jobs/:id", (c) => {
+  const job = composeActionJobs.get(c.req.param("id"));
+  if (!job) return c.json({ error: "Compose action job not found" }, 404);
+  return c.json(job);
+});
+
+app.post("/api/compose-library/up-service", async (c) => {
+  try {
+    const parsed = validateComposeActionBody(await c.req.json());
+    if (typeof parsed === "string") return c.json({ error: parsed }, 400);
+    if (!parsed.service) return c.json({ error: "Missing service" }, 400);
+
+    const denied = checkComposeFileAccess(parsed.composeFile);
+    if (denied) {
+      if (RESTRICTED_MODE && !isPathAllowed(parsed.composeFile)) return c.json({ error: denied }, 403);
+      return c.json({ error: denied }, 400);
+    }
+
+    const stack = buildStack(parsed.composeFile, [], isPathAllowed, COMPOSE_SCAN_PATHS);
+    if (stack.error) return c.json({ error: stack.error }, 400);
+    const svc = stack.services.find((s) => s.name === parsed.service);
+    if (!svc) return c.json({ error: `Service not found in compose file: ${parsed.service}` }, 404);
+    if (svc.profiles.length > 0) {
+      return c.json({ error: "Services with Compose profiles cannot be started individually yet." }, 400);
+    }
+
+    const uid = `${stack.project}/${svc.name}`;
+    const job = runComposeUp(parsed.composeFile, [svc.name], uid, "up-service");
+    return c.json({ ok: true, jobId: job.id });
+  } catch (err: any) {
+    return c.json({ error: err?.message || "Failed to start compose service" }, 500);
+  }
+});
+
+app.post("/api/compose-library/up-stack", async (c) => {
+  try {
+    const parsed = validateComposeActionBody(await c.req.json());
+    if (typeof parsed === "string") return c.json({ error: parsed }, 400);
+
+    const denied = checkComposeFileAccess(parsed.composeFile);
+    if (denied) {
+      if (RESTRICTED_MODE && !isPathAllowed(parsed.composeFile)) return c.json({ error: denied }, 403);
+      return c.json({ error: denied }, 400);
+    }
+
+    const stack = buildStack(parsed.composeFile, [], isPathAllowed, COMPOSE_SCAN_PATHS);
+    if (stack.error) return c.json({ error: stack.error }, 400);
+
+    const job = runComposeUp(parsed.composeFile, [], stack.project, "up-stack");
+    return c.json({ ok: true, jobId: job.id });
+  } catch (err: any) {
+    return c.json({ error: err?.message || "Failed to start compose stack" }, 500);
+  }
+});
+
+app.post("/api/compose-library/stop-stack", async (c) => {
+  try {
+    const parsed = validateComposeActionBody(await c.req.json());
+    if (typeof parsed === "string") return c.json({ error: parsed }, 400);
+
+    const denied = checkComposeFileAccess(parsed.composeFile);
+    if (denied) {
+      if (RESTRICTED_MODE && !isPathAllowed(parsed.composeFile)) return c.json({ error: denied }, 403);
+      return c.json({ error: denied }, 400);
+    }
+
+    const stack = buildStack(parsed.composeFile, [], isPathAllowed, COMPOSE_SCAN_PATHS);
+    if (stack.error) return c.json({ error: stack.error }, 400);
+
+    const job = runComposeStop(parsed.composeFile, stack.project, "stop-stack");
+    return c.json({ ok: true, jobId: job.id });
+  } catch (err: any) {
+    return c.json({ error: err?.message || "Failed to stop compose stack" }, 500);
+  }
+});
+
+app.post("/api/compose-library/delete-stack", async (c) => {
+  try {
+    const parsed = validateComposeActionBody(await c.req.json());
+    if (typeof parsed === "string") return c.json({ error: parsed }, 400);
+
+    const denied = checkComposeFileAccess(parsed.composeFile);
+    if (denied) {
+      if (RESTRICTED_MODE && !isPathAllowed(parsed.composeFile)) return c.json({ error: denied }, 403);
+      return c.json({ error: denied }, 400);
+    }
+
+    const stack = buildStack(parsed.composeFile, [], isPathAllowed, COMPOSE_SCAN_PATHS);
+    if (stack.error) return c.json({ error: stack.error }, 400);
+
+    const job = runComposeDown(parsed.composeFile, stack.project, "delete-stack");
+    return c.json({ ok: true, jobId: job.id });
+  } catch (err: any) {
+    return c.json({ error: err?.message || "Failed to delete compose stack" }, 500);
+  }
+});
 
 // ── Container actions ──
 app.post("/api/containers/:id/stop", async (c) => {
@@ -321,10 +577,7 @@ app.post("/api/containers/:id/rebuild", async (c) => {
     const uid = `${project}/${serviceName}`;
     const envArgs = findEnvFileArgs(composeFile);
     // Run rebuild in background — respond immediately
-    const proc = Bun.spawn(["docker", "compose", "-f", composeFile, ...envArgs, "up", "--build", "-d", serviceName], {
-      stdout: "pipe",
-      stderr: "pipe",
-    });
+    const proc = spawnDockerCompose(composeFile, [...envArgs, "up", "--build", "-d", serviceName]);
     proc.exited.then(async (exitCode) => {
       if (exitCode !== 0) {
         const stderr = await new Response(proc.stderr).text();
@@ -374,10 +627,7 @@ app.post("/api/containers/:id/recreate", async (c) => {
     const uid = `${project}/${serviceName}`;
     const envArgs = findEnvFileArgs(composeFile);
     // Recreate uses existing image (no --build), only re-applies compose config
-    const proc = Bun.spawn(["docker", "compose", "-f", composeFile, ...envArgs, "up", "--force-recreate", "-d", serviceName], {
-      stdout: "pipe",
-      stderr: "pipe",
-    });
+    const proc = spawnDockerCompose(composeFile, [...envArgs, "up", "--force-recreate", "-d", serviceName]);
     proc.exited.then(async (exitCode) => {
       if (exitCode !== 0) {
         const stderr = await new Response(proc.stderr).text();
@@ -427,10 +677,7 @@ app.post("/api/containers/:id/remove", async (c) => {
       }, 400);
     }
     const envArgs = findEnvFileArgs(composeFile);
-    const proc = Bun.spawn(["docker", "compose", "-f", composeFile, ...envArgs, "rm", "-sf", serviceName], {
-      stdout: "pipe",
-      stderr: "pipe",
-    });
+    const proc = spawnDockerCompose(composeFile, [...envArgs, "rm", "-sf", serviceName]);
     const exitCode = await proc.exited;
     if (exitCode !== 0) {
       const stderr = await new Response(proc.stderr).text();

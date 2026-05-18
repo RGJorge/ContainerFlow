@@ -146,6 +146,33 @@ export interface UpdateInfo {
   stars: number | null;
 }
 
+export type ComposeLibraryServiceState = "running" | "stopped" | "not_created" | "profiled";
+
+export interface ComposeLibraryService {
+  name: string;
+  image: string;
+  profiles: string[];
+  state: ComposeLibraryServiceState;
+  container_id?: string;
+  container_uid?: string;
+}
+
+export interface ComposeLibraryStack {
+  host: string;
+  project: string;
+  variant: string;
+  compose_file: string;
+  locked: boolean;
+  error?: string;
+  services: ComposeLibraryService[];
+  counts: {
+    running: number;
+    stopped: number;
+    not_created: number;
+    profiled: number;
+  };
+}
+
 export interface EventLogEntry {
   id: number;
   timestamp: number;

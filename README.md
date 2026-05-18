@@ -88,6 +88,7 @@ Available variables:
 | `AUTH_TOKEN` | _(empty)_ | Auth token. Empty = no auth, localhost only. Set = auth enabled, remote access allowed |
 | `DATA_DIR` | `./data` | Persistence directory: stats history (`.dockerflow-stats.db`), Discord config (`.dockerflow-discord.json`), per-container overrides (`.dockerflow-container-settings.json`), node positions and env file overrides. Auto-created on startup. In Docker, mounted at `/app/data` via the `containerflow-data` volume. |
 | `HOST_PROJECTS_DIR` | _(empty)_ | Additional path to mount so `rebuild`/`remove` can read compose files outside the defaults (`/home`, `/opt`, `/srv`, `/root`). Only needed for non-standard paths (e.g. `/data/apps`). |
+| `COMPOSE_SCAN_PATHS` | _(empty)_ | `:`-separated directories to scan for compose files in the Compose Library. These paths must be mounted into the ContainerFlow container at the same absolute paths. |
 | `ALLOWED_PATHS` | _(empty)_ | **Empty = everything actionable** (permissive mode). With values = `:`-separated list of prefixes; only containers whose compose file lives under one of these paths can execute actions, the rest appear with a lock icon. See [Security](#security) section. |
 | `ALLOW_NON_COMPOSE` | `false` | **Only applies when `ALLOWED_PATHS` is active.** If `ALLOWED_PATHS` is empty, this has no effect. When applicable: `false` blocks actions on non-compose containers (started with `docker run` directly); `true` allows them. |
 
@@ -134,6 +135,7 @@ bun run start
 ## Features
 
 - **Automatic discovery** — detects services via Docker socket, groups by project or compose file
+- **Compose Library** — scans configured stack folders and shows compose services even when no container exists yet. Start one service with `Up`, or launch the whole stack with `Up Stack`
 - **Smart connections** — detects app→database, app→cache, proxy→app, worker→broker relationships
 - **Real-time metrics** — CPU and memory per container, refreshed every 3 seconds
 - **Docker events** — visual flash when a container starts, stops or restarts
@@ -154,6 +156,27 @@ bun run start
 - **Discord notifications** — configurable webhook for state changes, resource alerts, manual actions and errors
 - **Per-container thresholds** — custom CPU/MEM overrides (with fallback to global thresholds) and notification toggle per service
 - **Settings page** — application configuration (auth, Discord, Docker hosts)
+
+### Compose Library
+
+The Compose Library is for services that exist in compose files but do not currently exist as Docker containers, for example stacks you keep down until needed.
+
+Configure one or more scan roots:
+
+```bash
+COMPOSE_SCAN_PATHS=/srv/stacks:/opt/stacks
+```
+
+ContainerFlow scans those folders recursively for `compose.yml`, `compose.yaml`, `docker-compose.yml`, and `docker-compose.yaml`. In Docker deployments, the scan paths must be mounted into the ContainerFlow container at the same absolute paths so `docker compose -f <file>` can read the same files.
+
+The library supports:
+
+- `Up` — runs `docker compose -f <file> up -d <service>`
+- `Up Stack` — runs `docker compose -f <file> up -d`
+- existing env-file detection used by rebuild/recreate
+- existing `ALLOWED_PATHS` restrictions
+
+Services using Compose `profiles` are visible, but individual `Up` is disabled in this version. The first implementation targets the local Docker host only; the response model includes `host: "local"` so future multi-host routing can use the same UI and API shape.
 
 ## Best practices
 
