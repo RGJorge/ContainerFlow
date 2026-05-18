@@ -27,8 +27,12 @@ export async function discoverServices(all: boolean, projects: string[]): Promis
   );
 
   let services: Service[] = containers.map((c, i) => {
-    const name = c.Labels["com.docker.compose.service"] || c.Names[0]?.replace("/", "") || "unknown";
-    const project = c.Labels["com.docker.compose.project"] || "docker";
+    // Docker Desktop on Windows may return null for Labels/Names/Ports
+    // where the Linux daemon returns {} / [] — defend at the boundary.
+    const labels = c.Labels ?? {};
+    const names = c.Names ?? [];
+    const name = labels["com.docker.compose.service"] || names[0]?.replace("/", "") || "unknown";
+    const project = labels["com.docker.compose.project"] || "docker";
     const info = inspections[i] as any;
 
     // Extract network IPs
@@ -64,7 +68,7 @@ export async function discoverServices(all: boolean, projects: string[]): Promis
       state,
       status: c.Status,
       ports: [...new Map(
-        c.Ports.filter((p) => p.PublicPort).map((p) => [
+        (c.Ports ?? []).filter((p) => p.PublicPort).map((p) => [
           `${p.PublicPort}:${p.PrivatePort}`,
           { host: p.PublicPort!, container: p.PrivatePort },
         ])
@@ -72,7 +76,7 @@ export async function discoverServices(all: boolean, projects: string[]): Promis
       networks: Object.keys(c.NetworkSettings?.Networks || {}),
       network_ips: networkIps,
       project,
-      compose_file: c.Labels["com.docker.compose.project.config_files"] || "",
+      compose_file: labels["com.docker.compose.project.config_files"] || "",
       env: (info?.Config?.Env || []) as string[],
       restart_policy: info?.HostConfig?.RestartPolicy?.Name || "",
       memory_limit: info?.HostConfig?.Memory || 0,
