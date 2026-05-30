@@ -6,6 +6,7 @@ import path from "path";
 import fs from "fs";
 import { docker, discoverServices, discoverConnections, getContainerLogs, streamContainerLogs } from "./docker";
 import { pollStats, watchDockerEvents } from "./watcher";
+import { computeGraphDiff } from "./diff";
 import { loadDiscordConfig, saveDiscordConfig, notifyStateChange, notifyResourceAlert, notifyUIAction, notifyActionError, testWebhook, checkDownServices, setNotificationListener } from "./discord";
 import { loadContainerSettings, saveContainerSettings } from "./container-settings";
 import { loadProjectAliases, saveProjectAliases, sanitizeAlias } from "./project-aliases";
@@ -14,7 +15,7 @@ import { getUpdateInfo } from "./update-check";
 import pkg from "../../package.json";
 import { initStatsDB, insertStats, getStatsHistory, getAllServicesStatsHistory } from "./stats-db";
 import { initEventsDB, insertEvent, insertNotification, getEvents, getNotifications, type EventLogEntry, type NotificationLogEntry } from "./events-db";
-import type { Service, Stats, WSMessage, DiscordConfig, ContainerSettings, StatsRange } from "../shared/types";
+import type { Service, Connection, Stats, WSMessage, DiscordConfig, ContainerSettings, StatsRange } from "../shared/types";
 
 /** Directory for persistent data files (SQLite, JSON configs, positions).
  *  Default: ./data subdirectory of cwd. Override via DATA_DIR env var. */
@@ -802,6 +803,28 @@ function cleanupLogStream(ws: WebSocket) {
   }
 }
 
+/** Send full graph + stats snapshot to a newly connected client.
+ *  Uses cached state if available; falls back to a fresh discover on cold start. */
+function sendSnapshot(ws: WebSocket): void {
+  if (lastBroadcastedServices.length > 0) {
+    try {
+      ws.send(JSON.stringify({ type: "snapshot", data: { services: lastBroadcastedServices, connections: lastBroadcastedConnections } }));
+      if (lastStats.length > 0) ws.send(JSON.stringify({ type: "stats", data: lastStats }));
+    } catch {}
+    return;
+  }
+  // Cold start: no data yet — do a fresh discover
+  discoverServices(ALL, PROJECTS).then(async (services) => {
+    const connections = await discoverConnections(services);
+    lastBroadcastedServices = services;
+    lastBroadcastedConnections = connections;
+    try {
+      ws.send(JSON.stringify({ type: "snapshot", data: { services, connections } }));
+      if (lastStats.length > 0) ws.send(JSON.stringify({ type: "stats", data: lastStats }));
+    } catch {}
+  }).catch(() => {});
+}
+
 // ── Docker events ──
 let servicesLock = false;
 let statsLock = false;
@@ -811,18 +834,16 @@ async function refreshServices() {
   servicesLock = true;
   try {
     const services = await discoverServices(ALL, PROJECTS);
-
-    const svcHash = services.map((s) => `${s.uid}:${s.state}`).join("|");
-    if (svcHash !== lastServicesHash) {
-      lastServicesHash = svcHash;
-      broadcast({ type: "services", data: services });
-    }
-
     const connections = await discoverConnections(services);
-    const connHash = connections.map((c) => `${c.from}:${c.to}`).join("|");
-    if (connHash !== lastConnectionsHash) {
-      lastConnectionsHash = connHash;
-      broadcast({ type: "connections", data: connections });
+
+    const diff = computeGraphDiff(
+      lastBroadcastedServices, services,
+      lastBroadcastedConnections, connections,
+    );
+    if (diff) {
+      lastBroadcastedServices = services;
+      lastBroadcastedConnections = connections;
+      broadcast({ type: "diff", data: diff });
     }
 
     // Stats polling is separate — don't block services refresh
@@ -880,8 +901,6 @@ async function refreshStats(services: Service[]) {
 let refreshTimer: ReturnType<typeof setTimeout> | undefined;
 let retryTimer: ReturnType<typeof setTimeout> | undefined;
 function scheduleRefresh() {
-  // Invalidate hash so next refresh always broadcasts (restart: same final state but clients need the update)
-  lastServicesHash = "";
   clearTimeout(refreshTimer);
   clearTimeout(retryTimer);
   refreshTimer = setTimeout(() => {
@@ -892,7 +911,6 @@ function scheduleRefresh() {
 
 // Immediate refresh after action endpoints (container already changed state)
 function immediateRefresh() {
-  lastServicesHash = "";
   clearTimeout(refreshTimer);
   clearTimeout(retryTimer);
   refreshServices();
@@ -920,9 +938,9 @@ watchDockerEvents((event) => {
   } catch {}
 });
 
-// ── Stats polling ──
-let lastServicesHash = "";
-let lastConnectionsHash = "";
+// ── Graph state (used for diff computation and new-client snapshots) ──
+let lastBroadcastedServices: Service[] = [];
+let lastBroadcastedConnections: Connection[] = [];
 /** Last stats snapshot — sent in /api/init so frontend has data immediately
  *  instead of waiting for the next polling cycle (~3s wait). */
 let lastStats: Stats[] = [];
@@ -959,16 +977,7 @@ const server = Bun.serve({
       clients.add(native);
 
       if (!AUTH_TOKEN) {
-        // No auth required — send data immediately
-        discoverServices(ALL, PROJECTS).then(async (services) => {
-          const connections = await discoverConnections(services);
-          const stats = await pollStats(services);
-          try {
-            native.send(JSON.stringify({ type: "services", data: services }));
-            native.send(JSON.stringify({ type: "connections", data: connections }));
-            native.send(JSON.stringify({ type: "stats", data: stats }));
-          } catch {}
-        }).catch(() => {});
+        sendSnapshot(native);
       }
     },
     close(ws) {
@@ -993,16 +1002,7 @@ const server = Bun.serve({
           if (msg.token === AUTH_TOKEN) {
             authenticatedClients.add(native);
             native.send(JSON.stringify({ type: "auth_ok" }));
-            // Send current services/connections/stats immediately
-            discoverServices(ALL, PROJECTS).then(async (services) => {
-              const connections = await discoverConnections(services);
-              const stats = await pollStats(services);
-              try {
-                native.send(JSON.stringify({ type: "services", data: services }));
-                native.send(JSON.stringify({ type: "connections", data: connections }));
-                native.send(JSON.stringify({ type: "stats", data: stats }));
-              } catch {}
-            }).catch(() => {});
+            sendSnapshot(native);
           } else {
             if (AUTH_TOKEN) recordFailedAttempt(wsIp);
             native.send(JSON.stringify({ type: "auth_error" }));

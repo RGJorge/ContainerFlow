@@ -1,7 +1,45 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import type { Service, Connection, Stats, DockerEvent, LogLine, WSMessage, ActionError, EventLogEntry, NotificationLogEntry } from "../../shared/types";
+import type { Service, Connection, Stats, DockerEvent, LogLine, WSMessage, GraphDiff, ActionError, EventLogEntry, NotificationLogEntry } from "../../shared/types";
 import type { StatsStore } from "./useStatsStore";
 import { arraysEqual, applyProcessing as applyProcessingPure } from "./processing";
+
+function connKey(c: Connection): string {
+  return `${c.from}|${c.to}|${c.network}`;
+}
+
+function applyServicesDiff(current: Service[], diff: GraphDiff): Service[] {
+  let result = [...current];
+  if (diff.servicesRemoved?.length) {
+    const removed = new Set(diff.servicesRemoved);
+    result = result.filter((s) => !removed.has(s.uid));
+  }
+  if (diff.servicesUpdated?.length) {
+    const updated = new Map(diff.servicesUpdated.map((s) => [s.uid, s]));
+    result = result.map((s) => updated.get(s.uid) ?? s);
+  }
+  if (diff.servicesAdded?.length) {
+    const existing = new Set(result.map((s) => s.uid));
+    for (const s of diff.servicesAdded) {
+      if (!existing.has(s.uid)) result.push(s);
+    }
+  }
+  return result;
+}
+
+function applyConnectionsDiff(current: Connection[], diff: GraphDiff): Connection[] {
+  let result = [...current];
+  if (diff.connectionsRemoved?.length) {
+    const removed = new Set(diff.connectionsRemoved);
+    result = result.filter((c) => !removed.has(connKey(c)));
+  }
+  if (diff.connectionsAdded?.length) {
+    const existing = new Set(result.map(connKey));
+    for (const c of diff.connectionsAdded) {
+      if (!existing.has(connKey(c))) result.push(c);
+    }
+  }
+  return result;
+}
 
 export function useDocker(token = "", statsStore?: StatsStore, onPositions?: (pos: Record<string, { x: number; y: number }>) => void) {
   const [services, setServices] = useState<Service[]>([]);
@@ -86,19 +124,24 @@ export function useDocker(token = "", statsStore?: StatsStore, onPositions?: (po
         }
 
         switch (msg.type as WSMessage["type"]) {
-          case "services": {
-            lastRawServicesRef.current = msg.data as Service[];
-            const incoming = applyProcessing(msg.data as Service[]);
+          case "snapshot": {
+            lastRawServicesRef.current = msg.data.services as Service[];
+            const incoming = applyProcessing(msg.data.services as Service[]);
             setServices((prev) => arraysEqual(prev, incoming) ? prev : incoming);
+            setConnections(msg.data.connections as Connection[]);
             break;
           }
-          case "connections":
-            setConnections((prev) => {
-              if (prev.length === msg.data.length &&
-                  prev.every((c: any, i: number) => c.from === msg.data[i].from && c.to === msg.data[i].to)) return prev;
-              return msg.data;
-            });
+          case "diff": {
+            const diff = msg.data as GraphDiff;
+            const nextRaw = applyServicesDiff(lastRawServicesRef.current, diff);
+            lastRawServicesRef.current = nextRaw;
+            const incoming = applyProcessing(nextRaw);
+            setServices((prev) => arraysEqual(prev, incoming) ? prev : incoming);
+            if (diff.connectionsAdded?.length || diff.connectionsRemoved?.length) {
+              setConnections((prev) => applyConnectionsDiff(prev, diff));
+            }
             break;
+          }
           case "stats": {
             for (const s of msg.data) {
               statsRef.current.set(s.service, s);

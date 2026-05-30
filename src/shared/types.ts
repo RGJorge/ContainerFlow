@@ -165,9 +165,17 @@ export interface NotificationLogEntry {
   message: string;
 }
 
+export interface GraphDiff {
+  servicesAdded?: Service[];
+  servicesRemoved?: string[];      // uids
+  servicesUpdated?: Service[];     // full object (includes uid)
+  connectionsAdded?: Connection[];
+  connectionsRemoved?: string[];   // "from|to|network" keys
+}
+
 export type WSMessage =
-  | { type: "services"; data: Service[] }
-  | { type: "connections"; data: Connection[] }
+  | { type: "snapshot"; data: { services: Service[]; connections: Connection[] } }
+  | { type: "diff"; data: GraphDiff }
   | { type: "stats"; data: Stats[] }
   | { type: "docker_event"; data: DockerEvent }
   | { type: "subscribe_logs"; container: string }
