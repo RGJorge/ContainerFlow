@@ -2,26 +2,27 @@
 
 Thanks for your interest in ContainerFlow! This document explains how to participate **right now**.
 
-## Current status: Issues only
+## Current status: Pull requests are open
 
-ContainerFlow is in early development (`v0.x`). Until the architecture stabilizes and there's an active community, **we're not accepting pull requests yet**.
+ContainerFlow is still `v0.x` and evolving fast, but **we now accept pull requests**.
 
-### What you can do today
+### Ways to contribute
 
 ✅ **Open issues** — bug reports, feature requests, questions, ideas
+✅ **Send pull requests** — fixes and features (see below)
 ✅ **Star the repo** — helps visibility and motivates updates
 ✅ **Share feedback** — what works, what doesn't, what's missing
 ✅ **Try it in your setup** — and tell us what you broke
 
-### What's coming
+### Sending a pull request
 
-Once the project has a stable foundation, we'll open pull requests with:
-- A `CODE_OF_CONDUCT.md` to set community expectations (already in repo)
-- Coding standards / linting rules
-- A "good first issue" label for easy entry points
-- Review SLAs
+- **For anything non-trivial, open (or comment on) an issue first** so we can agree on scope and approach before you build — it avoids wasted work.
+- Keep `bun run typecheck` and `bun run test` green.
+- Route any new UI strings through the i18n dictionaries (EN + ES) — see `src/client/i18n.tsx`. Don't hardcode UI strings.
+- Add tests for new behavior where it makes sense.
+- We prioritize changes that align with the [roadmap](docs/roadmap.md).
 
-Estimated timeline: when version reaches `v0.1.0` or earlier if there's clear demand.
+Since the architecture is still moving, large or speculative PRs without a prior issue may be asked to wait or scope down.
 
 ## Reporting bugs
 
