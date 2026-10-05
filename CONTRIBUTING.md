@@ -4,7 +4,7 @@ Thanks for your interest in ContainerFlow! This document explains how to partici
 
 ## Current status: Pull requests are open
 
-ContainerFlow is still `v0.x` and evolving fast, but **we now accept pull requests**.
+ContainerFlow is still `v0.x` and evolving fast, but **we accept pull requests as of October 5, 2026**.
 
 ### Ways to contribute
 
